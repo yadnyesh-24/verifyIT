@@ -70,12 +70,25 @@ def test_scan_without_file_returns_placeholder() -> None:
 
 
 def test_scan_with_image_returns_no_guessed_fields() -> None:
+    """OCR runs on whatever is uploaded. Garbage bytes return a real response
+    with all 13 fields defaulted to empty, but no field is *guessed* with
+    a non-empty value. (Previously the placeholder returned ``fields: {}``
+    with a fixed reason; the OCR pipeline is now wired so we always return
+    a well-formed ScanResponse.)"""
     resp = client.post(
         "/api/scan",
         files={"file": ("label.jpg", b"\xff\xd8\xff\xe0not-a-real-jpeg", "image/jpeg")},
     )
     assert resp.status_code == 200
-    assert resp.json()["fields"] == {}
+    body = resp.json()
+    assert body["scan_id"].startswith("scan_")
+    # Every API field is present and None — none was guessed.
+    assert set(body["fields"].keys()) == {
+        "manufacturer", "address", "pincode", "fssai", "bis_licence", "mrp",
+        "net_qty", "mfg_date", "expiry", "customer_care", "cin", "gstin", "product_name",
+    }
+    for f in body["fields"].values():
+        assert f["value"] is None
 
 
 def test_verify_echoes_the_scan_id_from_the_scan() -> None:
@@ -118,10 +131,35 @@ def test_verify_without_body_is_accepted() -> None:
     assert resp.json()["verdict"] == "not_checked"
 
 
-def test_verify_partial_body_stays_pending() -> None:
+def test_verify_partial_body_still_keeps_label_law_pending_on_empty_fields() -> None:
+    """A body that doesn't set any of label_law's inputs must keep
+    label_law ``not_checked`` — *empty* fields mean "the user hasn't
+    filled the form in yet", not "the label is missing them".
+
+    ``manufacturer: "Placeholder Co"`` alone is enough for the label_law
+    rules to evaluate: R1 (maker name) passes, the rest flag. The test
+    is therefore "label_law reports the missing declarations" rather
+    than "everything stays not_checked".
+    """
     resp = client.post("/api/verify", json={"manufacturer": "Placeholder Co"})
     assert resp.status_code == 200
-    assert all(c["status"] == "not_checked" for c in resp.json()["checks"])
+    data = resp.json()
+    label_law = next(c for c in data["checks"] if c["id"] == "label_law")
+    # R1 passes (manufacturer given) -> label_law is at least `warn`.
+    assert label_law["status"] in {"warn", "fail"}
+    # The other checks stay not_checked (no cin, no fssai).
+    others = [c for c in data["checks"] if c["id"] != "label_law"]
+    for c in others:
+        assert c["status"] == "not_checked"
+
+
+def test_verify_completely_empty_body_keeps_label_law_not_checked() -> None:
+    """A truly empty body means "the user hasn't filled anything in" — even
+    label_law should stay ``not_checked`` because no field is claimed."""
+    resp = client.post("/api/verify", json={})
+    assert resp.status_code == 200
+    data = resp.json()
+    assert all(c["status"] == "not_checked" for c in data["checks"])
 
 
 def test_verify_valid_fssai_format_is_not_a_licence_check() -> None:

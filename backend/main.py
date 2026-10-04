@@ -215,12 +215,16 @@ def health_with_db() -> dict[str, Any]:
 async def scan(file: UploadFile | None = File(default=None)) -> ScanResponse:
     """Read a label photo and return the extracted fields for one scan session.
 
-    Placeholder: the OCR pipeline is owned by another workstream and is not
-    connected yet, so no fields are returned (and none are guessed). A ``scan_id``
-    is minted here so the review screen can send it back with ``/api/verify``. The
-    uploaded file is accepted and intentionally not stored.
+    With a file: the OCR pipeline (preprocess → Tesseract → field extract)
+    runs and returns the detected fields. Without one: the legacy
+    ``not_checked`` placeholder is returned, with a real ``scan_id`` for the
+    review screen to send back. The uploaded file is accepted and
+    intentionally not stored.
     """
-    return ScanResponse(**providers.build_scan())
+    if file is None or not file.filename:
+        return ScanResponse(**providers.build_scan())
+    file_bytes = await file.read()
+    return ScanResponse(**providers.build_scan(file_bytes=file_bytes))
 
 
 @app.post("/api/verify", response_model=VerifyResponse)

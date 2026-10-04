@@ -36,9 +36,15 @@ def configure_tesseract(
 
     Respects ``TESSERACT_CMD`` and ``TESSDATA_PREFIX`` from the environment by
     default, so the team's ``.env`` setup Just Works.
+
+    On Windows, the UB-Mannheim installer drops ``tesseract.exe`` in
+    ``C:\\Program Files\\Tesseract-OCR`` which is *not* on the default
+    ``PATH``. pytesseract shells out to that binary, so we also prepend the
+    install directory to ``PATH`` if the file exists and isn't already there.
     """
     import os
     import pytesseract
+    from pathlib import Path
 
     if cmd is None:
         cmd = os.environ.get("TESSERACT_CMD")
@@ -46,8 +52,23 @@ def configure_tesseract(
         tessdata_prefix = os.environ.get("TESSDATA_PREFIX")
     if cmd:
         pytesseract.pytesseract.tesseract_cmd = cmd
+        # Make sure the binary's directory is on PATH for the subprocess
+        # pytesseract invokes; otherwise the shell can't resolve "tesseract".
+        tdir = str(Path(cmd).parent)
+        cur = os.environ.get("PATH", "")
+        if tdir.lower() not in cur.lower().split(os.pathsep):
+            os.environ["PATH"] = tdir + os.pathsep + cur
     if tessdata_prefix:
         os.environ["TESSDATA_PREFIX"] = tessdata_prefix
+    # If neither was supplied and the default install path exists, use it.
+    elif cmd is None:
+        default = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+        if Path(default).exists():
+            pytesseract.pytesseract.tesseract_cmd = default
+            tdir = str(Path(default).parent)
+            cur = os.environ.get("PATH", "")
+            if tdir.lower() not in cur.lower().split(os.pathsep):
+                os.environ["PATH"] = tdir + os.pathsep + cur
     global _LANG
     _LANG = lang
 
