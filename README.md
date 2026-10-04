@@ -73,8 +73,11 @@ VerifyIT/
 └─ .env.example
 ```
 
-> `src/*.py` are the Read / rule modules Sunil is adding — the package and the
-> interfaces exist, the implementations land with his commits.
+> **Not committed yet** — these land with the owners' commits: the `src/*.py`
+> modules (`preprocess`, `ocr`, `fields`, `label_law`, `evaluate`),
+> `docs/label_rules.md`, `data/reference/*`, `data/ground_truth.csv`, the captured
+> photos in `data/test_labels/`, and the frontend app folder (`web/`).
+> Everything else shown above is already in `main`.
 
 ## Setup
 
