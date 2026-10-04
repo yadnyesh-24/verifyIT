@@ -38,6 +38,20 @@ DEFAULT_DATABASE_URL = "postgresql://127.0.0.1:5432/verifyit"
 #: responsive even when PostgreSQL is not running.
 CONNECT_TIMEOUT_SECONDS = 2
 
+#: Session settings applied to every connection this module opens.
+#:
+#: ``pg_trgm``'s default similarity threshold is 0.30, which is far too
+#: permissive for a two-word company name. On the full 2M-row MCA snapshot the
+#: ``%`` scan then hands the executor ~131k candidates and ~55k heap pages to
+#: recheck, which costs ~7s per lookup however warm the cache is. At 0.55 the
+#: same lookup considers ~3k candidates and ~3k heap pages (~23 MB, so it stays
+#: cached) and answers in well under a second.
+#:
+#: It must stay strictly below ``backend.mca.NAME_MATCH_THRESHOLD`` so it can
+#: never hide a match the matcher would have accepted - ``tests/test_mca.py``
+#: asserts exactly that.
+SESSION_SETTINGS: dict[str, str] = {"pg_trgm.similarity_threshold": "0.55"}
+
 
 class DatabaseUnavailable(RuntimeError):
     """Raised when the configured registry database cannot be reached."""
@@ -66,9 +80,27 @@ def connection(*, connect_timeout: int = CONNECT_TIMEOUT_SECONDS) -> Iterator[An
         raise DatabaseUnavailable(str(exc)) from exc
 
     try:
+        apply_session_settings(conn)
+    except Exception as exc:  # pragma: no cover - an optimisation, never fatal
+        logger.debug("could not apply session settings: %s", exc)
+
+    try:
         yield conn
     finally:
         conn.close()
+
+
+def apply_session_settings(conn: Any) -> None:
+    """Apply ``SESSION_SETTINGS`` to ``conn``.
+
+    Uses ``set_config`` rather than ``SET`` because it accepts parameters; a
+    custom GUC whose extension has not loaded yet is stored as a placeholder and
+    takes effect the moment ``pg_trgm`` is loaded.
+    """
+    with conn.cursor() as cur:
+        for name, value in SESSION_SETTINGS.items():
+            cur.execute("SELECT set_config(%s, %s, false)", (name, value))
+    conn.commit()
 
 
 def fetch_all(

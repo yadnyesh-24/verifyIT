@@ -70,6 +70,7 @@ export DATABASE_URL="$SB"          # or put it in .env (git-ignored, auto-loaded
 | The password has `@`, `#`, `/`, `:`, `?` | Percent-encode it. `sunil24@IITK` becomes `sunil24%40IITK`, otherwise the URL is mis-parsed. |
 | A live company is reported as not Active | The MCA bulk export stores the four-character `company_status` **code** (`ACTV`, not `Active`). `MCA_ACTIVE_STATUSES` in `backend/providers.py` accepts both; add any new code there rather than guessing a label. |
 | `sql/001_companies.sql` seems to have run but the table is missing | Supabase enables `pg_trgm` by default, so that line alone proves nothing. Confirm with `select to_regclass('companies')` or `scripts/check_registry.py`. |
+| Name-only lookups take several seconds | `pg_trgm`'s default similarity threshold (0.30) makes the `%` scan hand the executor ~131k candidates and ~55k heap pages to recheck. `backend/db.py` applies `pg_trgm.similarity_threshold = 0.55` on every connection, which drops it to ~3k candidates: ~0.13s instead of ~7s on the full snapshot. |
 
 > **Free-plan storage.** Supabase Free gives a project **500 MB**, and a full MCA
 > export is roughly **450 MB of CSV plus the table and its trigram index**. Check

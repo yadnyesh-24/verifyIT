@@ -68,6 +68,19 @@ def test_normalize_name_threshold_is_documented() -> None:
     assert 0.0 < mca.NAME_MATCH_THRESHOLD < 1.0
 
 
+def test_trigram_floor_prunes_without_hiding_matches() -> None:
+    """The SQL similarity floor must cut the index scan, never a real match.
+
+    ``pg_trgm``'s 0.30 default makes the GIN index hand back ~150k candidates
+    for a two-word name on the full snapshot - seconds per lookup. The floor in
+    ``backend.db`` lifts that, so it has to stay above the default and strictly
+    below ``NAME_MATCH_THRESHOLD``, otherwise a name the matcher would have
+    accepted would never reach it.
+    """
+    floor = float(db.SESSION_SETTINGS["pg_trgm.similarity_threshold"])
+    assert 0.30 < floor < mca.NAME_MATCH_THRESHOLD
+
+
 # --- Pure: importer header/date helpers ---------------------------------------
 
 
