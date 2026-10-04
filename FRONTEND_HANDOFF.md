@@ -6,10 +6,50 @@ backend already returns the exact contract below. Most checks are honest
 `company` check is the exception - it resolves once the team imports the MCA
 snapshot (see [`MCA_SETUP.md`](MCA_SETUP.md)), so build it for every status.
 
-- **Base URL (local):** `http://127.0.0.1:8001`
-- **CORS:** `http://localhost:3000` and `http://127.0.0.1:3000` are allowed.
+- **Base URL (Aditya's Mac, same Wi-Fi):** `http://172.17.21.35:8001`
+- **Base URL (on the Mac itself):** `http://127.0.0.1:8001`
+- **Health check:** `http://172.17.21.35:8001/api/health` returns
+  `{"status":"ok","app":"Verify It"}`
+- **CORS:** only `http://localhost:3000` and `http://127.0.0.1:3000` are allowed
+  today, so a browser page served from the LAN IP gets `OPTIONS -> 400`. **Send
+  Aditya your exact dev origin** (`http://<host>:<port>`) and it gets added -
+  `*` will not be opened.
 - **Frozen mock data:** [`samples/`](samples/) — use these as fixtures and build
   the whole interface against them until the API is wired.
+
+The IP is Aditya's machine on the current Wi-Fi, so it changes whenever that
+network does. The `/api/health` URL above is the quickest way to tell whether the
+server is up; if it does not load, ask rather than retry blindly.
+
+> **Build against the contract, not against the server.** `samples/*.json` and
+> [`API_CONTRACT.md`](API_CONTRACT.md) are the frozen shape and are what the tests
+> compare the API to. The live server is a convenience for a smoke test.
+
+## Reaching the backend from your laptop
+
+Aditya's server is bound to every interface (`0.0.0.0:8001`), so anything on the
+same Wi-Fi can reach it:
+
+```bash
+curl http://172.17.21.35:8001/api/health
+curl -X POST http://172.17.21.35:8001/api/verify \
+  -H 'Content-Type: application/json' -d '{"cin":"F00016"}'
+```
+
+`{"cin":"F00016"}` is a real CIN from the imported MCA snapshot, so it returns
+`company: "pass"`, `score: 100`, `checks_ran: 1`, `verdict: "low_risk"` — a good
+one-line smoke test that the database and the API are both alive.
+
+To run your own copy instead:
+
+```bash
+cd verify-it
+./.venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8001
+```
+
+Some networks (guest Wi-Fi, corporate APs) block laptop-to-laptop traffic even on
+the same SSID - if the curl times out, that is usually why. A phone hotspot works.
+
 
 ## Getting the code
 

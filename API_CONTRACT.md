@@ -3,10 +3,14 @@
 The **actual** request/response contract of the Verify It backend as implemented
 in `backend/main.py` and `backend/providers.py`. Written for frontend consumers.
 
-- **Base URL (local):** `http://127.0.0.1:8001`
+- **Base URL (same Wi-Fi as Aditya's Mac):** `http://172.17.21.35:8001`
+- **Base URL (localhost):** `http://127.0.0.1:8001`
 - **Content type:** `application/json`, except `POST /api/scan` which is
   `multipart/form-data`.
-- **CORS:** the dev origins `http://localhost:3000` and `http://127.0.0.1:3000`.
+- **CORS:** only the dev origins `http://localhost:3000` and
+  `http://127.0.0.1:3000`. Any other origin - including a browser page served from
+  a LAN IP - is rejected with `OPTIONS -> 400` until it is added explicitly. `*` is
+  never opened; send the exact origin to be allowed.
 - **Frozen mock data:** [`samples/`](samples/) — kept in sync by
   `tests/test_samples.py`.
 

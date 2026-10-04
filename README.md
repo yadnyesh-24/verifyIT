@@ -132,10 +132,20 @@ tesseract --list-langs   # must show: eng, hin
 ## The backend API
 
 ```bash
+# on your own machine only
 uvicorn backend.main:app --reload --port 8001
+
+# or, reachable by teammates on the same Wi-Fi (binds every interface)
+./.venv/bin/uvicorn backend.main:app --host 0.0.0.0 --port 8001
 ```
 
 Swagger UI at <http://127.0.0.1:8001/docs>.
+
+Binding `0.0.0.0` only makes the server *listen* everywhere - it does **not** let a
+browser on another machine call it, because [`API_CONTRACT.md`](API_CONTRACT.md)'s
+CORS list still has to name that page's origin. The dev origins are kept explicit
+on purpose; `*` is never opened. See
+[`FRONTEND_HANDOFF.md`](FRONTEND_HANDOFF.md) for the current LAN URL.
 
 | Method | Path | Description |
 | ------ | ---- | ----------- |
