@@ -67,6 +67,14 @@ export DATABASE_URL="$SB"          # or put it in .env (git-ignored, auto-loaded
 | `prepared statement ... does not exist`, TEMP tables vanish | You are on the transaction pooler (port **6543**). Use session mode, port **5432**. |
 | Rows are there but the check stays `not_checked` | `name_normalized` is empty - the CSV was uploaded through a dashboard instead of `scripts/import_mca.py`. Re-import. |
 | Everything `not_checked` one morning | A **Free** plan project pauses after 7 days of low activity. Dashboard -> **Resume project**. |
+| The password has `@`, `#`, `/`, `:`, `?` | Percent-encode it. `sunil24@IITK` becomes `sunil24%40IITK`, otherwise the URL is mis-parsed. |
+| A live company is reported as not Active | The MCA bulk export stores the four-character `company_status` **code** (`ACTV`, not `Active`). `MCA_ACTIVE_STATUSES` in `backend/providers.py` accepts both; add any new code there rather than guessing a label. |
+| `sql/001_companies.sql` seems to have run but the table is missing | Supabase enables `pg_trgm` by default, so that line alone proves nothing. Confirm with `select to_regclass('companies')` or `scripts/check_registry.py`. |
+
+> **Free-plan storage.** Supabase Free gives a project **500 MB**, and a full MCA
+> export is roughly **450 MB of CSV plus the table and its trigram index**. Check
+> `select pg_size_pretty(pg_database_size(current_database()))` before importing
+> all ~2M rows; importing locally has no such ceiling.
 
 > **Do not upload the CSV through the Supabase table editor.** It infers column
 > types (a pincode of `001100` becomes `1100`) and leaves `name_normalized`
@@ -78,7 +86,12 @@ export DATABASE_URL="$SB"          # or put it in .env (git-ignored, auto-loaded
 
 Either export works — the importer is **header-driven** and maps the column names
 itself (`CIN`, `Company Name`, `Company Status`, `Date of Registration`,
-`Registered State`, ... ; case and punctuation are ignored):
+`Registered State`, ... ; case and punctuation are ignored). The MCA *bulk*
+download spells several of them out in full
+(`corporate_identification_number`, `company_name`, `registrar_of_companies`,
+`email_addr`, `registered_office_address`); those aliases resolve too. Run a
+`--dry-run` first — its "N mapped, M unmapped" line tells you immediately whether
+the export was understood.
 
 - **data.gov.in** — <https://data.gov.in/catalog/company-master-data>
   (search "Company Master Data", download the CSV resource).

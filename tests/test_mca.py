@@ -108,6 +108,35 @@ def test_resolve_columns_requires_cin_and_name() -> None:
         importer.resolve_columns(["CIN", "Company Status"])
 
 
+def test_resolve_columns_maps_the_mca_bulk_export_headers() -> None:
+    """The MCA bulk download spells the CIN column out in full.
+
+    Its headers must resolve too, otherwise the importer refuses the whole
+    export with "the CIN could not be located".
+    """
+    header = [
+        "corporate_identification_number",
+        "company_name",
+        "company_status",
+        "company_class",
+        "company_category",
+        "company_sub_category",
+        "date_of_registration",
+        "registered_state",
+        "registrar_of_companies",
+        "email_addr",
+        "registered_office_address",
+    ]
+    mapping, unmapped = importer.resolve_columns(header)
+    assert unmapped == []
+    assert mapping["cin"] == "corporate_identification_number"
+    assert mapping["name"] == "company_name"
+    assert mapping["status"] == "company_status"
+    assert mapping["roc"] == "registrar_of_companies"
+    assert mapping["email"] == "email_addr"
+    assert mapping["address"] == "registered_office_address"
+
+
 @pytest.mark.parametrize(
     ("raw", "expected"),
     [
@@ -329,6 +358,40 @@ def test_check_company_cin_hit_passes(monkeypatch: pytest.MonkeyPatch) -> None:
     check = providers.check_company(cin="TESTFIXTURE-CIN-0001")
     assert check["status"] == "pass"
     assert check["flags"] == []
+
+
+def test_check_company_accepts_the_bulk_export_active_code(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The MCA bulk export writes ``ACTV`` where the portal writes ``Active``.
+
+    Missing this would downgrade every live company to a high-severity "not
+    Active" warning - a false accusation, and the opposite of the point.
+    """
+    _stub_match(monkeypatch, _match(status="ACTV"))
+    check = providers.check_company(cin="TESTFIXTURE-CIN-0001")
+    assert check["status"] == "pass"
+    assert check["flags"] == []
+
+
+def test_check_company_bulk_export_strike_off_code_still_warns(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Codes that are not Active must keep warning - the fix is not a blanket pass."""
+    _stub_match(monkeypatch, _match(status="STOF"))
+    check = providers.check_company(cin="TESTFIXTURE-CIN-0002")
+    assert check["status"] == "warn"
+    assert check["flags"][0]["code"] == "MCA_COMPANY_NOT_ACTIVE"
+
+
+@pytest.mark.parametrize("status", ["Active", "ACTIVE", "active", "ACTV", "  actv  "])
+def test_is_active_status_accepts_both_register_spellings(status: str) -> None:
+    assert providers._is_active_status(status)
+
+
+@pytest.mark.parametrize("status", ["Strike Off", "STOF", "AMAL", "ULQD", "Dissolved"])
+def test_is_active_status_rejects_every_other_status(status: str) -> None:
+    assert not providers._is_active_status(status)
 
 
 def test_check_company_inactive_cin_warns(monkeypatch: pytest.MonkeyPatch) -> None:

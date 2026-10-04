@@ -55,7 +55,19 @@ SCHEMA_PATH = REPO_ROOT / "sql" / "001_companies.sql"
 #: normalisation ("Company Name", "company_name" and "COMPANY NAME" are the same
 #: key), which keeps unrelated columns from being mis-claimed.
 COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
-    "cin": ("cin", "company cin", "cin number", "companycin", "cin of company"),
+    # The MCA bulk export spells the CIN column out in full while the portal and
+    # data.gov.in use a short form. All of them must resolve, otherwise
+    # ``resolve_columns`` cannot find the CIN and refuses the whole export.
+    "cin": (
+        "cin",
+        "company cin",
+        "cin number",
+        "companycin",
+        "cin of company",
+        "cin of the company",
+        "corporate identification number",
+        "company identification number",
+    ),
     "name": ("company name", "company_name", "companyname", "name of company", "name"),
     "status": ("company status", "company_status", "status", "company current status"),
     "company_class": ("company class", "company_class", "class of company", "class_of_company"),
@@ -83,7 +95,7 @@ COLUMN_ALIASES: dict[str, tuple[str, ...]] = {
     "state": ("registered state", "registered_state", "state", "registered state code"),
     "district": ("district", "registered district", "registered_district"),
     "pincode": ("pincode", "pin code", "pin_code", "postal code", "registered pincode"),
-    "email": ("email", "email id", "email_id", "email address"),
+    "email": ("email", "email id", "email_id", "email address", "email addr"),
     "address": (
         "registered office address",
         "registered_office_address",

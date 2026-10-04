@@ -96,10 +96,13 @@ def _fssai_format_flag(fssai_number: str | None) -> dict[str, Any] | None:
 
 # --- Company / CIN (local MCA Company Master Data snapshot) -------------------
 
-#: MCA ``company_status`` values that mean the company is live. A status that is
-#: present but missing from this set (Strike Off, Amalgamated, Under Liquidation,
-#: ...) is reported as a warning instead of silently passing.
-MCA_ACTIVE_STATUSES = frozenset({"ACTIVE"})
+#: MCA ``company_status`` values that mean the company is live. The MCA *Company
+#: Master Data* bulk export writes the four-character code (``ACTV``) where the
+#: MCA portal spells it out (``Active``); both mean the same thing, so both are
+#: accepted. A status that is present but missing from this set (Strike Off,
+#: Amalgamated, Under Liquidation, ...) is reported as a warning instead of
+#: silently passing.
+MCA_ACTIVE_STATUSES = frozenset({"ACTIVE", "ACTV"})
 
 
 def _is_active_status(status: str) -> bool:
