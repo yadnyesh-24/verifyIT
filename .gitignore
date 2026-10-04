@@ -1,0 +1,12 @@
+# large data, shared outside Git
+data/raw/
+data/exports/
+*.dump
+*.sqlite
+*.csv.gz
+
+# environments and secrets
+.venv/
+node_modules/
+.env
+__pycache__/
