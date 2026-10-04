@@ -1,27 +1,43 @@
 /**
- * Home page. Big "Scan label" CTA, upload photo, image preview with retake,
- * "How it works" steps, language toggle in the header.
+ * Home / Scan page.
  *
- * Picking a file - from camera or library - goes straight to `/scanning` with
- * the chosen file in a transient ref (URL.createObjectURL). The page also
- * honours `?mock=genuine|multi|fake` for the demo (see `lib/mocks.ts`).
+ * Big dashed drop-zone card with two CTAs ("Take photo" opens the rear
+ * camera on mobile via `capture="environment"`; "Upload from gallery" uses
+ * the regular file picker). Drag-and-drop is supported on desktop.
+ *
+ * After a photo is chosen we show the preview + Retake / Use-this-photo.
+ * The "How it works" row uses lucide icons inside soft brand tiles so the
+ * page reads as a product, not a wireframe. Demo presets are hidden in a
+ * floating menu (see `?demo=1`).
+ *
+ * The page is forced dynamic because `useSearchParams` and the demo menu
+ * make the static-export bailout noisier than the benefit of a cache hit.
  */
 "use client";
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
-import Image from "next/image";
-import { Camera, Upload, RotateCcw } from "lucide-react";
+import {
+  Camera,
+  Upload,
+  RotateCcw,
+  ScanLine,
+  ClipboardCheck,
+  ShieldCheck,
+} from "lucide-react";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
+import { Card } from "@/components/ui/card";
 import { Header } from "@/components/header";
 import { ErrorBoundary } from "@/components/error-boundary";
+import { StepIndicator } from "@/components/step-indicator";
+import { DemoMenu } from "@/components/demo-menu";
 import { Skeleton } from "@/components/ui/skeleton";
-import { useScan } from "@/lib/scan-store";
-import { mockKeys, isMockMode } from "@/lib/mocks";
+import { useScan, getScanApi } from "@/lib/scan-store";
+import { useDataMode } from "@/lib/data-mode";
 import { t } from "@/lib/i18n";
+import { cn } from "@/lib/utils";
 
+/** Inline shell rendered while the client component hydrates. */
 export default function HomePage() {
   return (
     <ErrorBoundary>
@@ -31,123 +47,181 @@ export default function HomePage() {
           <HomeContent />
         </React.Suspense>
       </main>
+      <React.Suspense fallback={null}>
+        <DemoMenu />
+      </React.Suspense>
     </ErrorBoundary>
   );
 }
 
+/**
+ * Home content lives in its own module so the static export doesn't try to
+ * evaluate `useSearchParams` at build time. The Suspense wrapper in
+ * `HomePage` above suspends until the dynamic params resolve.
+ */
 function HomeContent() {
   const router = useRouter();
   const params = useSearchParams();
   const { lang } = useScan();
   const fileRef = React.useRef<HTMLInputElement>(null);
   const cameraRef = React.useRef<HTMLInputElement>(null);
+  const inputRef = React.useRef<HTMLInputElement>(null);
   const [preview, setPreview] = React.useState<string | null>(null);
+  const [dragging, setDragging] = React.useState(false);
 
-  const mockParam = params.get("mock");
-  const isDemoMock = mockKeys.includes(mockParam as never);
-  const mockActive = isMockMode() || isDemoMock;
+  const mode = useDataMode();
+  const isLive = mode.mode === "live";
 
-  const goToScanning = React.useCallback(() => {
-    router.push(`/scanning${mockActive && mockParam ? `?mock=${mockParam}` : ""}`);
-  }, [router, mockActive, mockParam]);
+  const goToScanning = () => {
+    router.push(`/scanning${params.toString() ? `?${params.toString()}` : ""}`);
+  };
 
   const onPick = (file: File | undefined) => {
     if (!file) return;
-    const url = URL.createObjectURL(file);
-    try {
-      sessionStorage.setItem(
-        "verifyit:pendingImage",
-        JSON.stringify({ name: file.name, size: file.size, type: file.type }),
-      );
-      // Stash the actual file on window: ferrying a binary blob between client
-      // routes without serialising it.
-      (window as unknown as { __pendingFile?: File }).__pendingFile = file;
-    } catch {
-      /* sessionStorage unavailable */
-    }
-    setPreview(url);
+    const reader = new FileReader();
+    reader.onload = () => {
+      const url = reader.result as string;
+      setPreview(url);
+      getScanApi().setPhoto(url);
+    };
+    reader.readAsDataURL(file);
+    (window as unknown as { __pendingFile?: File }).__pendingFile = file;
+  };
+
+  const onDrop = (e: React.DragEvent<HTMLDivElement>) => {
+    e.preventDefault();
+    setDragging(false);
+    const file = e.dataTransfer.files?.[0];
+    onPick(file);
   };
 
   return (
-    <div className="space-y-10">
-      <section className="text-center">
-        <h1 className="text-3xl font-bold tracking-tight sm:text-4xl">
-          {t(lang, "app.productName")}
+    <div className="space-y-8">
+      <StepIndicator className="hidden sm:flex" />
+
+      <section className="text-center sm:text-left">
+        <h1 className="mx-auto max-w-2xl text-balance text-3xl font-bold tracking-tight sm:text-4xl">
+          {t(lang, "hero.headline")}
         </h1>
-        <p className="mx-auto mt-3 max-w-xl text-base text-muted-foreground sm:text-lg">
-          {t(lang, "app.tagline")}
+        <p className="mx-auto mt-3 max-w-2xl text-base text-muted sm:text-lg">
+          {t(lang, "hero.subline")}
         </p>
+        <p className="mt-2 text-sm text-subtle">{t(lang, "hero.tip")}</p>
       </section>
 
       <section
         aria-label="Capture or upload a label"
-        className="mx-auto flex max-w-xl flex-col items-center gap-4"
+        className="mx-auto flex max-w-2xl flex-col gap-3"
       >
         {preview ? (
-          <div className="w-full overflow-hidden rounded-xl border bg-card">
-            <Image
-              src={preview}
-              alt="Captured label"
-              width={800}
-              height={600}
-              unoptimized
-              className="h-auto w-full object-contain"
-            />
+          <div className="space-y-3">
+            <div className="overflow-hidden rounded-card border bg-surface shadow-sm">
+              {/* eslint-disable-next-line @next/next/no-img-element */}
+              <img
+                src={preview}
+                alt={t(lang, "hero.photoAlt")}
+                className="h-auto w-full object-contain"
+              />
+            </div>
+            <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
+              <Button asChild variant="outline" className="sm:w-auto">
+                <button
+                  type="button"
+                  onClick={() => {
+                    setPreview(null);
+                    getScanApi().setPhoto(null);
+                  }}
+                >
+                  <RotateCcw className="h-4 w-4" aria-hidden="true" />
+                  {t(lang, "hero.retake")}
+                </button>
+              </Button>
+              <Button size="lg" onClick={goToScanning} className="sm:w-auto">
+                <ScanLine className="h-5 w-5" aria-hidden="true" />
+                {t(lang, "hero.useThisPhoto")}
+              </Button>
+            </div>
           </div>
-        ) : null}
-
-        <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-center">
-          <Button
-            size="lg"
-            onClick={() => cameraRef.current?.click()}
-            className="w-full sm:w-auto"
-          >
-            <Camera className="h-5 w-5" aria-hidden="true" />
-            {t(lang, "app.scanLabel")}
-          </Button>
-          <Button
-            size="lg"
-            variant="outline"
-            onClick={() => fileRef.current?.click()}
-            className="w-full sm:w-auto"
-          >
-            <Upload className="h-5 w-5" aria-hidden="true" />
-            {t(lang, "app.uploadPhoto")}
-          </Button>
-        </div>
-
-        {preview ? (
-          <div className="flex w-full flex-col gap-2 sm:flex-row sm:justify-center">
-            <Button
-              size="lg"
-              variant="success"
-              onClick={goToScanning}
-              className="w-full sm:w-auto"
-            >
-              {t(lang, "review.verify")}
-            </Button>
-            <Button
-              size="lg"
-              variant="ghost"
-              onClick={() => {
-                setPreview(null);
-                URL.revokeObjectURL(preview);
+        ) : (
+          <Card>
+            <div
+              role="button"
+              tabIndex={0}
+              onClick={() => inputRef.current?.click()}
+              onKeyDown={(e) => {
+                if (e.key === "Enter" || e.key === " ") {
+                  e.preventDefault();
+                  inputRef.current?.click();
+                }
               }}
-              className="w-full sm:w-auto"
+              onDragOver={(e) => {
+                e.preventDefault();
+                setDragging(true);
+              }}
+              onDragLeave={() => setDragging(false)}
+              onDrop={onDrop}
+              className={cn(
+                "m-1 grid cursor-pointer place-items-center rounded-card border-2 border-dashed bg-surface-2 p-6 text-center transition-colors sm:p-10",
+                dragging
+                  ? "border-brand bg-brand-soft"
+                  : "border-hairline hover:border-brand",
+              )}
             >
-              <RotateCcw className="h-4 w-4" aria-hidden="true" />
-              {t(lang, "app.retake")}
-            </Button>
-          </div>
-        ) : null}
+              <div className="mx-auto grid max-w-md gap-3">
+                <div
+                  aria-hidden="true"
+                  className="mx-auto grid h-14 w-14 place-items-center rounded-full bg-brand-soft text-brand"
+                >
+                  <Camera className="h-6 w-6" />
+                </div>
+                <p className="text-base font-semibold sm:text-lg">
+                  {t(lang, "hero.takePhoto")}
+                </p>
+                <p className="text-sm text-muted">{t(lang, "hero.dragDrop")}</p>
+                <div className="mt-1 flex flex-col gap-2 sm:flex-row sm:justify-center">
+                  <Button
+                    size="lg"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      cameraRef.current?.click();
+                    }}
+                  >
+                    <Camera className="h-5 w-5" aria-hidden="true" />
+                    {t(lang, "hero.takePhoto")}
+                  </Button>
+                  <Button
+                    size="lg"
+                    variant="outline"
+                    onClick={(e) => {
+                      e.stopPropagation();
+                      fileRef.current?.click();
+                    }}
+                  >
+                    <Upload className="h-5 w-5" aria-hidden="true" />
+                    {t(lang, "hero.uploadGallery")}
+                  </Button>
+                </div>
+              </div>
+            </div>
+          </Card>
+        )}
 
+        <input
+          ref={inputRef}
+          type="file"
+          accept="image/*"
+          capture="environment"
+          className="sr-only"
+          aria-label={t(lang, "hero.takePhoto")}
+          onChange={(e) => onPick(e.target.files?.[0])}
+        />
         <input
           ref={cameraRef}
           type="file"
           accept="image/*"
           capture="environment"
           className="sr-only"
-          aria-label={t(lang, "app.scanLabel")}
+          aria-label={t(lang, "hero.takePhoto")}
           onChange={(e) => onPick(e.target.files?.[0])}
         />
         <input
@@ -155,35 +229,9 @@ function HomeContent() {
           type="file"
           accept="image/*"
           className="sr-only"
-          aria-label={t(lang, "app.uploadPhoto")}
+          aria-label={t(lang, "hero.uploadGallery")}
           onChange={(e) => onPick(e.target.files?.[0])}
         />
-      </section>
-
-      <section aria-label="Demo presets" className="mx-auto max-w-2xl">
-        <Card>
-          <CardContent className="grid grid-cols-1 gap-2 p-4 sm:grid-cols-3">
-            {mockKeys.map((key) => (
-              <Link
-                key={key}
-                href={`/?mock=${key}`}
-                className="rounded-md border bg-background p-3 text-sm transition-colors hover:bg-muted"
-              >
-                <span className="block font-medium capitalize">{key}</span>
-                <span className="block text-xs text-muted-foreground">
-                  {key === "genuine" && "Single party, all green"}
-                  {key === "multi" && "Marketer + 2 units, state mismatch"}
-                  {key === "fake" && "Company not found, FSSAI wrong"}
-                </span>
-              </Link>
-            ))}
-          </CardContent>
-        </Card>
-        <p className="mt-2 text-center text-xs text-muted-foreground">
-          {mockActive
-            ? "Demo mode: data is loaded from the bundled mock fixtures."
-            : "Live mode: requests go to the FastAPI backend."}
-        </p>
       </section>
 
       <section
@@ -194,63 +242,64 @@ function HomeContent() {
           id="how-it-works"
           className="text-center text-lg font-semibold sm:text-xl"
         >
-          {t(lang, "app.howItWorksTitle")}
+          {t(lang, "how.title")}
         </h2>
         <ol className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          {getHowItWorks(lang).map((step, idx) => (
-            <li key={idx}>
-              <Card className="h-full">
-                <CardContent className="space-y-1 p-4">
-                  <p className="text-sm font-semibold">{step.title}</p>
-                  <p className="text-sm text-muted-foreground">{step.body}</p>
-                </CardContent>
-              </Card>
-            </li>
-          ))}
+          {steps(lang).map((step, i) => {
+            const Icon = stepIcons[i] ?? ScanLine;
+            return (
+              <li key={step.title}>
+                <Card className="h-full">
+                  <div className="flex h-full items-start gap-3 p-4">
+                    <div
+                      aria-hidden="true"
+                      className="grid h-10 w-10 shrink-0 place-items-center rounded-btn bg-brand-soft text-brand"
+                    >
+                      <Icon className="h-5 w-5" />
+                    </div>
+                    <div className="space-y-1">
+                      <p className="text-sm font-semibold">{step.title}</p>
+                      <p className="text-sm text-muted">{step.body}</p>
+                    </div>
+                  </div>
+                </Card>
+              </li>
+            );
+          })}
         </ol>
       </section>
+
+      <p className="text-center text-xs text-subtle" aria-live="polite">
+        {mode.mode === "live"
+          ? "Live mode: results come from the FastAPI backend."
+          : "Demo mode: showing canned labels. Set DATA_MODE=live to use the backend."}
+      </p>
     </div>
   );
 }
 
-function getHowItWorks(lang: "en" | "hi") {
+const stepIcons = [ScanLine, ClipboardCheck, ShieldCheck];
+
+function steps(lang: "en" | "hi") {
   return lang === "hi"
     ? [
-        {
-          title: "1. लेबल की फ़ोटो लें",
-          body: "पैकेट को सीधा पकड़ें और पीछे का हिस्सा कैप्चर करें जहाँ लाइसेंस छपा हो।",
-        },
-        {
-          title: "2. पढ़ी गई जानकारी जाँचें",
-          body: "नाम, लाइसेंस और तारीखें जाँचें। जो गलत लगे उसे सुधारें।",
-        },
-        {
-          title: "3. नतीजा देखें",
-          body: "ट्रस्ट स्कोर, हर जाँच का परिणाम और सरकारी पोर्टल के लिंक देखें।",
-        },
+        { title: "पैकेट का पिछला हिस्सा खींचें", body: "अच्छी रोशनी, सीधी सतह, लाइसेंस साफ़ दिखें।" },
+        { title: "जाँचें कि हमने क्या पढ़ा", body: "जाँच से पहले ग़लत लगने वाले नाम या नंबर ठीक करें।" },
+        { title: "नतीजा देखें", body: "ट्रस्ट स्कोर, हर जाँच का परिणाम, और सरकारी पोर्टल के लिंक।" },
       ]
     : [
-        {
-          title: "1. Snap the label",
-          body: "Hold the packet flat and capture the back of the pack where licences appear.",
-        },
-        {
-          title: "2. Confirm what we found",
-          body: "Check the names, licences and dates we read. Fix anything that looks off.",
-        },
-        {
-          title: "3. Get the verdict",
-          body: "See a Trust Score, the open checks, and the official portal links to verify yourself.",
-        },
+        { title: "Snap the back of the pack", body: "Good light, flat surface, the licence block clearly visible." },
+        { title: "Confirm what we read", body: "Fix any names or numbers that look off before we verify." },
+        { title: "See the verdict", body: "A Trust Score, the open checks, and links to the official portals." },
       ];
 }
 
 function HomeSkeleton() {
   return (
-    <div className="space-y-8">
-      <Skeleton className="mx-auto h-8 w-48" />
-      <Skeleton className="mx-auto h-4 w-80" />
-      <Skeleton className="mx-auto h-12 w-72" />
+    <div className="space-y-6">
+      <Skeleton className="mx-auto h-8 w-2/3" />
+      <Skeleton className="mx-auto h-4 w-1/2" />
+      <Skeleton className="h-44 w-full rounded-card" />
     </div>
   );
 }

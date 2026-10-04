@@ -1,54 +1,87 @@
 /**
  * Trust Score gauge.
  *
- * Score is in [0, 100]. We color the arc with three thresholds:
- *   - score >= 75 -> success (green) + "Looks genuine"
- *   - 45 <= score < 75 -> warning (amber) + "Check carefully"
- *   - score < 45     -> destructive (red) + "High risk"
+ * The arc animates from 0 to its value over ~800ms (CSS transition on the
+ * dashoffset). `null` shows "—" + the score-pending label so the UI is
+ * honest about not having a verdict yet.
  *
- * A `null` score renders a dashed "pending" ring so the UI is honest about not
- * having a verdict yet.
+ * Colour thresholds (also used by the verdict text):
+ *   >= 75 -> pass  (green)  "Looks genuine"
+ *   45..74 -> warn  (amber)  "Check carefully"
+ *   < 45  -> risk  (red)    "High risk"
  */
 "use client";
 
+import { useEffect, useState } from "react";
 import { t } from "@/lib/i18n";
 import { cn } from "@/lib/utils";
-import type { Lang } from "@/lib/types";
+import type { Lang, ScoreBasis } from "@/lib/contract";
+
+const SIZE = 240;
+const STROKE = 16;
+const R = (SIZE - STROKE) / 2;
+const CIRC = 2 * Math.PI * R;
 
 interface Props {
   score: number | null;
+  verdict?: string | null;
+  basis?: ScoreBasis;
   lang: Lang;
   className?: string;
 }
 
-const SIZE = 220;
-const STROKE = 14;
-const R = (SIZE - STROKE) / 2;
-const CIRC = 2 * Math.PI * R;
-
-function bucket(score: number): {
-  color: string;
+interface VerdictInfo {
   labelKey: string;
-} {
-  if (score >= 75) return { color: "text-success", labelKey: "results.verdictGenuine" };
-  if (score >= 45) return { color: "text-warning", labelKey: "results.verdictCaution" };
-  return { color: "text-destructive", labelKey: "results.verdictRisk" };
+  /** Tailwind classes for the colour (text + arc). */
+  color: string;
+  stroke: string;
 }
 
-export function ScoreGauge({ score, lang, className }: Props) {
+function bucket(score: number): VerdictInfo {
+  if (score >= 75)
+    return { labelKey: "results.verdictLooksGenuine", color: "text-pass", stroke: "stroke-pass" };
+  if (score >= 45)
+    return { labelKey: "results.verdictCheckCarefully", color: "text-warn", stroke: "stroke-warn" };
+  return { labelKey: "results.verdictHighRisk", color: "text-risk", stroke: "stroke-risk" };
+}
+
+export function ScoreGauge({ score, verdict, basis, lang, className }: Props) {
+  // Animate the score from 0 -> score when it appears.
+  const [displayed, setDisplayed] = useState(0);
+  useEffect(() => {
+    if (score === null) {
+      setDisplayed(0);
+      return;
+    }
+    let raf = 0;
+    const start = performance.now();
+    const dur = 800;
+    const from = 0;
+    const to = score;
+    const tick = (now: number) => {
+      const t01 = Math.min(1, (now - start) / dur);
+      // easeOutCubic
+      const eased = 1 - Math.pow(1 - t01, 3);
+      setDisplayed(Math.round(from + (to - from) * eased));
+      if (t01 < 1) raf = requestAnimationFrame(tick);
+    };
+    raf = requestAnimationFrame(tick);
+    return () => cancelAnimationFrame(raf);
+  }, [score]);
+
   if (score === null) {
     return (
       <div
         className={cn(
-          "flex flex-col items-center justify-center gap-2",
+          "flex flex-col items-center justify-center gap-3 text-center",
           className,
         )}
       >
         <svg
           viewBox={`0 0 ${SIZE} ${SIZE}`}
-          className="h-44 w-auto text-muted-foreground"
+          className="h-52 w-auto text-pending"
           role="img"
-          aria-label={t(lang, "results.verdictPending")}
+          aria-label={t(lang, "results.scorePending")}
         >
           <circle
             cx={SIZE / 2}
@@ -56,33 +89,46 @@ export function ScoreGauge({ score, lang, className }: Props) {
             r={R}
             fill="none"
             stroke="currentColor"
-            strokeOpacity="0.25"
+            strokeOpacity="0.2"
             strokeWidth={STROKE}
-            strokeDasharray="6 8"
+            strokeDasharray="6 10"
           />
         </svg>
-        <p className="text-sm font-medium text-muted-foreground">
-          {t(lang, "results.verdictPending")}
-        </p>
+        <div>
+          <p className="text-5xl font-bold text-muted">—</p>
+          <p className="mt-2 text-sm font-medium text-muted">
+            {t(lang, "results.scorePending")}
+          </p>
+        </div>
       </div>
     );
   }
 
-  const { color, labelKey } = bucket(score);
-  const offset = CIRC * (1 - score / 100);
+  const info = bucket(score);
+  // The verdict string from the backend wins when present (it's the same colour
+  // scheme but provides the ground truth from the server).
+  const verdictLabel = (() => {
+    if (verdict === "looks_genuine") return t(lang, "results.verdictLooksGenuine");
+    if (verdict === "check_carefully") return t(lang, "results.verdictCheckCarefully");
+    if (verdict === "high_risk") return t(lang, "results.verdictHighRisk");
+    if (verdict === "not_checked") return t(lang, "results.verdictPending");
+    return t(lang, info.labelKey);
+  })();
+
+  const offset = CIRC * (1 - displayed / 100);
 
   return (
     <div
       className={cn(
-        "flex flex-col items-center justify-center gap-2",
+        "flex flex-col items-center justify-center gap-2 text-center",
         className,
       )}
     >
       <svg
         viewBox={`0 0 ${SIZE} ${SIZE}`}
-        className={cn("h-44 w-auto", color)}
+        className={cn("h-52 w-auto", info.color)}
         role="img"
-        aria-label={`Trust score ${score} of 100 - ${t(lang, labelKey)}`}
+        aria-label={`Trust score ${score} of 100 - ${verdictLabel}`}
       >
         <circle
           cx={SIZE / 2}
@@ -90,7 +136,7 @@ export function ScoreGauge({ score, lang, className }: Props) {
           r={R}
           fill="none"
           stroke="currentColor"
-          strokeOpacity="0.15"
+          strokeOpacity="0.12"
           strokeWidth={STROKE}
         />
         <circle
@@ -104,26 +150,42 @@ export function ScoreGauge({ score, lang, className }: Props) {
           strokeDasharray={CIRC}
           strokeDashoffset={offset}
           transform={`rotate(-90 ${SIZE / 2} ${SIZE / 2})`}
-          style={{ transition: "stroke-dashoffset 600ms ease" }}
+          style={{ transition: "stroke-dashoffset 80ms linear" }}
         />
         <text
           x="50%"
-          y="50%"
+          y="48%"
           textAnchor="middle"
           dominantBaseline="central"
-          className="fill-foreground"
-          fontSize="48"
+          className="fill-ink"
+          fontSize="56"
           fontWeight="700"
         >
-          {score}
+          {displayed}
+        </text>
+        <text
+          x="50%"
+          y="68%"
+          textAnchor="middle"
+          dominantBaseline="central"
+          className="fill-subtle"
+          fontSize="14"
+        >
+          / 100
         </text>
       </svg>
-      <p className="text-sm font-medium text-muted-foreground">
+      <p className="text-xs font-medium uppercase tracking-wide text-muted">
         {t(lang, "results.scoreLabel")}
       </p>
-      <p className={cn("text-base font-semibold", color)}>
-        {t(lang, labelKey)}
-      </p>
+      <p className={cn("text-lg font-semibold", info.color)}>{verdictLabel}</p>
+      {basis ? (
+        <p className="text-xs text-muted">
+          {t(lang, "results.basedOn", {
+            done: basis.done,
+            total: basis.total,
+          })}
+        </p>
+      ) : null}
     </div>
   );
 }

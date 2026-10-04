@@ -2,49 +2,113 @@
 @tailwind components;
 @tailwind utilities;
 
+/**
+ * Design tokens. Every value used in the UI is declared here so the screens
+ * stay consistent. Components only reference Tailwind classes (text-ink,
+ * bg-surface, border-hairline, ...); raw hex never appears outside this file.
+ */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
-    --card: 0 0% 100%;
-    --card-foreground: 222 47% 11%;
-    --primary: 222 47% 11%;
-    --primary-foreground: 210 40% 98%;
-    --secondary: 210 40% 96%;
-    --secondary-foreground: 222 47% 11%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-    --success: 142 71% 38%;
-    --success-foreground: 0 0% 100%;
-    --warning: 32 95% 44%;
-    --warning-foreground: 0 0% 100%;
-    --border: 214 32% 91%;
-    --input: 214 32% 91%;
-    --ring: 222 47% 11%;
-    --radius: 0.625rem;
+    /* Surfaces */
+    --canvas: 152 30% 98%;        /* #F8FAF9 - warm off-white background */
+    --surface: 0 0% 100%;         /* #FFFFFF - cards */
+    --surface-2: 210 20% 96%;     /* subtle well (e.g. file inputs) */
+
+    /* Text */
+    --ink: 222 47% 11%;           /* #0F172A */
+    --muted: 215 19% 35%;        /* #475569 */
+    --subtle: 215 16% 47%;        /* secondary copy */
+
+    /* Lines / focus */
+    --hairline: 220 13% 91%;      /* #E5E7EB */
+    --ring: 173 80% 32%;          /* teal-700 ~ matches brand */
+
+    /* Brand */
+    --brand: 173 80% 24%;         /* #0F766E */
+    --brand-hover: 175 84% 20%;   /* #115E59 */
+    --brand-soft: 173 58% 94%;    /* pale teal for chips */
+    --brand-foreground: 0 0% 100%;
+
+    /* Status (fg + bg) */
+    --pass: 142 71% 36%;          /* #16A34A */
+    --pass-soft: 142 76% 92%;     /* #DCFCE7 */
+    --warn: 32 95% 36%;           /* #D97706 */
+    --warn-soft: 48 96% 89%;      /* #FEF3C7 */
+    --risk: 0 72% 48%;            /* #DC2626 */
+    --risk-soft: 0 86% 94%;       /* #FEE2E2 */
+    --pending: 215 16% 41%;       /* #64748B */
+    --pending-soft: 214 32% 95%;  /* #F1F5F9 */
+
+    /* Shape */
+    --radius-card: 1rem;          /* rounded-2xl */
+    --radius-btn: 0.75rem;        /* rounded-xl */
   }
 }
 
 @layer base {
   * {
-    border-color: hsl(var(--border));
+    border-color: hsl(var(--hairline));
   }
+
   html {
     -webkit-tap-highlight-color: transparent;
     -webkit-text-size-adjust: 100%;
+    font-family: var(--font-sans), ui-sans-serif, system-ui, -apple-system,
+      "Segoe UI", Roboto, sans-serif;
+    color: hsl(var(--ink));
+    background: hsl(var(--canvas));
   }
+
+  /* Hindi: switch the root font to Noto Sans Devanagari. */
+  html[lang="hi"] body,
+  html[lang="hi"] {
+    font-family: var(--font-hindi), "Noto Sans Devanagari", ui-sans-serif, system-ui,
+      sans-serif;
+  }
+
   body {
-    background-color: hsl(var(--background));
-    color: hsl(var(--foreground));
-    font-feature-settings: "rlig" 1, "calt" 1;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-      "Noto Sans", "Noto Sans Devanagari", "Helvetica Neue", Arial, sans-serif;
+    font-size: 1rem;
+    line-height: 1.5;
+    background: hsl(var(--canvas));
+    color: hsl(var(--ink));
+    min-height: 100dvh;
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
   }
-  /* Improve accessibility - focus rings only when tabbing. */
+
+  @media (min-width: 768px) {
+    body {
+      font-size: 1.0625rem;
+    }
+  }
+
+  /* Heading ramp; matches the type scale tokens. */
+  h1 {
+    font-size: 1.875rem;
+    line-height: 2.25rem;
+    font-weight: 700;
+    letter-spacing: -0.01em;
+  }
+  @media (min-width: 768px) {
+    h1 {
+      font-size: 2.25rem;
+      line-height: 2.75rem;
+    }
+  }
+  h2 {
+    font-size: 1.375rem;
+    line-height: 1.75rem;
+    font-weight: 600;
+    letter-spacing: -0.005em;
+  }
+  @media (min-width: 768px) {
+    h2 {
+      font-size: 1.5rem;
+      line-height: 1.875rem;
+    }
+  }
+
+  /* Focus ring only when tabbing. */
   :focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
@@ -52,26 +116,38 @@
   }
 }
 
+@layer components {
+  .control-min {
+    min-height: 3rem;
+  }
+}
+
+.shimmer {
+  background: linear-gradient(
+    90deg,
+    hsl(var(--surface-2)) 0%,
+    hsl(var(--surface-2) / 0.55) 40%,
+    hsl(var(--surface-2)) 80%
+  );
+  background-size: 200px 100%;
+  animation: shimmer 1.4s infinite linear;
+}
+
+.scan-line {
+  background: linear-gradient(
+    to bottom,
+    transparent 0%,
+    hsl(var(--brand) / 0.55) 50%,
+    transparent 100%
+  );
+}
+
 @media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
+  *,
+  *::before,
+  *::after {
     animation-duration: 0.001ms !important;
     animation-iteration-count: 1 !important;
     transition-duration: 0.001ms !important;
   }
-}
-
-/* Pulse animation used by skeletons. */
-@keyframes shimmer {
-  0% { background-position: -200px 0; }
-  100% { background-position: calc(200px + 100%) 0; }
-}
-.shimmer {
-  background: linear-gradient(
-    90deg,
-    hsl(var(--muted)) 0%,
-    hsl(var(--muted) / 0.6) 40%,
-    hsl(var(--muted)) 80%
-  );
-  background-size: 200px 100%;
-  animation: shimmer 1.4s infinite linear;
 }
