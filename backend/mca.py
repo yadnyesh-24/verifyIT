@@ -107,20 +107,47 @@ def _rows(sql: str, params: dict[str, Any], conn: Any | None) -> list[dict[str, 
     return rows if rows is not None else []
 
 
-def find_by_cin(cin: str | None, *, conn: Any | None = None) -> dict[str, Any] | None:
+def find_by_cin(
+    cin: str | None,
+    *,
+    name: str | None = None,
+    conn: Any | None = None,
+) -> dict[str, Any] | None:
     """Return the register row whose CIN matches exactly, or ``None``.
 
     The CIN is compared upper-cased with surrounding whitespace removed (a label
     often prints it with spaces); nothing else is guessed.
+
+    When ``name`` is supplied the row also carries ``name_similarity``: the
+    ``pg_trgm`` similarity between the *normalised* supplied name and the row's
+    stored ``name_normalized``. Normalising both sides is what makes an ordinary
+    legal-suffix variation collapse to the same key ("Acme Foods Pvt Ltd" and
+    "Acme Foods Limited" both become ``ACME FOODS``).
+
+    It is computed in the **same statement** as the lookup, deliberately: the
+    caller is then never handed a CIN match it cannot compare the printed name
+    against, and an extra round trip cannot fail on its own and quietly turn a
+    conflicting name into a clean pass.
     """
     value = (cin or "").strip().upper()
     if not value:
         return None
 
+    needle = normalize_name(name or "")
+    params: dict[str, Any] = {"cin": value}
+    if needle:
+        params["needle"] = needle
+        compared = (
+            "round(similarity(name_normalized, %(needle)s)::numeric, 4)::float8 "
+            "AS name_similarity"
+        )
+    else:
+        compared = "NULL::float8 AS name_similarity"
+
     rows = _rows(
-        f"SELECT {_COLUMNS}, 1.0::float8 AS similarity FROM companies "
-        "WHERE cin = %(cin)s LIMIT 1",
-        {"cin": value},
+        f"SELECT {_COLUMNS}, 1.0::float8 AS similarity, {compared} "
+        "FROM companies WHERE cin = %(cin)s LIMIT 1",
+        params,
         conn,
     )
     return rows[0] if rows else None
@@ -164,12 +191,17 @@ def match_company(
     """Return the best register match for a label, or ``None``.
 
     A CIN is tried first and, when found, the row is returned with
-    ``matched_on == "cin"``. Otherwise the name is matched fuzzily and returned
-    with ``matched_on == "name"`` only when the similarity reaches
-    ``NAME_MATCH_THRESHOLD``. ``None`` means "no confident match" - which, per the
-    rules above, is not a statement about whether the company exists.
+    ``matched_on == "cin"``. Because the supplied ``name`` is passed along, that
+    row also carries ``name_similarity`` - the resemblance between the printed
+    maker name and the register's own name - so callers can check that the two
+    actually agree instead of trusting the CIN alone.
+
+    Otherwise the name is matched fuzzily and returned with ``matched_on ==
+    "name"`` only when the similarity reaches ``NAME_MATCH_THRESHOLD``. ``None``
+    means "no confident match" - which, per the rules above, is not a statement
+    about whether the company exists.
     """
-    by_cin = find_by_cin(cin, conn=conn)
+    by_cin = find_by_cin(cin, name=name, conn=conn)
     if by_cin is not None:
         by_cin["matched_on"] = "cin"
         return by_cin

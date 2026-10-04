@@ -50,17 +50,26 @@ These rules apply to every Cline task in this repository. Keep them in sync with
 - A check status is one of `pass`, `warn`, `fail`, `not_checked`.
 - A flag is `{code, severity, en, hi, evidence}`; `severity` is `high|medium|low`.
   Known codes: `FSSAI_FORMAT_INVALID` (licence); `MCA_COMPANY_NOT_ACTIVE`,
-  `MCA_COMPANY_STATUS_UNKNOWN`, `MCA_NAME_ONLY_MATCH` and
-  `MCA_NAME_ONLY_MATCH_NOT_ACTIVE` (company). `evidence` must stay
-  JSON-serialisable, and every MCA flag must record `matched_on` (`"cin"` or
-  `"name"`) plus the `status` it saw.
-- The `company` check: an exact `cin` hit with an Active status -> `pass`. A CIN
-  hit with a non-Active status, or with **no recorded status at all**, -> `warn`
-  (`MCA_COMPANY_NOT_ACTIVE` / `MCA_COMPANY_STATUS_UNKNOWN`) - a CIN proves the
-  register *contains* the company, never that it is still live. A fuzzy name-only
-  hit -> `warn` and **never** `pass`: `MCA_NAME_ONLY_MATCH` (low) when the matched
-  record is Active, `MCA_NAME_ONLY_MATCH_NOT_ACTIVE` (medium) when it is not.
-  Anything else -> `not_checked`. It never returns `fail`.
+  `MCA_COMPANY_STATUS_UNKNOWN`, `MCA_NAME_MISMATCH`, `MCA_NAME_ONLY_MATCH`,
+  `MCA_NAME_ONLY_MATCH_NOT_ACTIVE` and `MCA_NAME_ONLY_MATCH_STATUS_UNKNOWN`
+  (company). `evidence` must stay JSON-serialisable, and every MCA flag must record
+  `matched_on` (`"cin"` or `"name"`) plus the `status` it saw.
+- The `company` check: an exact `cin` hit -> `pass` only when **both** the recorded
+  status is Active **and** any supplied `manufacturer` name reconciles with the
+  register's name for that CIN. Reconcile by comparing `mca.normalize_name()` of both
+  sides first (that is what absorbs `PVT`/`LTD`/`LIMITED`/`&` variations), then, only
+  if they still differ, the `name_similarity` that `mca.find_by_cin()` returns for
+  that CIN, against `providers.CIN_NAME_MATCH_THRESHOLD`. A disagreement is
+  `MCA_NAME_MISMATCH` (medium) - confirmation required, never an accusation.
+  Status findings: explicitly non-Active -> `MCA_COMPANY_NOT_ACTIVE` (high), nothing
+  recorded -> `MCA_COMPANY_STATUS_UNKNOWN` (medium). Name and status are independent,
+  so report both when both apply.
+- The `company` check on a **name-only** match: `warn` and **never** `pass`:
+  `MCA_NAME_ONLY_MATCH` (low) when the record is Active,
+  `MCA_NAME_ONLY_MATCH_NOT_ACTIVE` (medium) when it is *explicitly* not Active, and
+  `MCA_NAME_ONLY_MATCH_STATUS_UNKNOWN` (medium) when no status is recorded. Never
+  describe a missing status as "not Active" or "inactive" - that asserts something
+  the export does not say. Anything else -> `not_checked`. It never returns `fail`.
 - `official_links[]` is `{label, url, copy}` (copy the number, open the portal).
 - `POST /api/scan` mints a fresh `scan_id` (`scan_<uuid4hex>`). It is a session
   handle, not registry data: nothing is persisted and nothing is inferred from it.

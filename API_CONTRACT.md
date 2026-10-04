@@ -141,23 +141,37 @@ snapshot, or without a confident match, it stays `"not_checked"`.
 
 | Situation | `status` | Flags |
 | --------- | -------- | ----- |
-| `cin` is in the register and the recorded status is Active | `"pass"` | none |
+| `cin` is in the register, its status is Active, **and** any supplied `manufacturer` name reconciles with the register's name for that CIN | `"pass"` | none |
 | `cin` is in the register but the status is not Active (e.g. `Strike Off`) | `"warn"` | `MCA_COMPANY_NOT_ACTIVE` (high) |
 | `cin` is in the register but **no status is recorded** for it | `"warn"` | `MCA_COMPANY_STATUS_UNKNOWN` (medium) |
+| `cin` is in the register, but the supplied `manufacturer` name belongs to a different company | `"warn"` | `MCA_NAME_MISMATCH` (medium) |
 | only the `manufacturer` name matched, fuzzily (similarity >= 0.62), and that record is Active | `"warn"` | `MCA_NAME_ONLY_MATCH` (low) |
-| a name matched, and that record is not Active (or has no recorded status) | `"warn"` | `MCA_NAME_ONLY_MATCH_NOT_ACTIVE` (medium) |
+| a name matched, and that record is *explicitly* not Active | `"warn"` | `MCA_NAME_ONLY_MATCH_NOT_ACTIVE` (medium) |
+| a name matched, and that record has **no status recorded** | `"warn"` | `MCA_NAME_ONLY_MATCH_STATUS_UNKNOWN` (medium) |
 | no match, no snapshot, or a company the snapshot does not contain | `"not_checked"` | none - a miss is **never** a failure |
 
-Two rules make the table easier to read:
+The name and the status are **independent findings on a CIN hit**, so both are
+reported when both apply: a struck-off company whose printed name also disagrees
+carries two flags, worst severity first.
 
-- **A `pass` requires an Active status.** A CIN only proves the register *contains*
-  the company; it never proves the company is still live, and it is worth nothing
-  when the export records no status at all.
-- **A name match can never pass**, whatever the matched record's status says - a
-  name is not a unique identifier.
+Three rules make the table easier to read:
 
-Both rules exist because of the same failure mode: a company that is not active
-(or not recorded as active) must never be presented as a confirmed active maker.
+- **A `pass` needs both questions answered.** An exact CIN settles *which record*
+  this is; it says nothing about whether that company is still live, and nothing
+  about whether the label is even describing it. `pass` therefore requires an Active
+  status **and** a reconciling printed name.
+- **A legal-form suffix is not a mismatch.** Both names are normalised first, so
+  `PVT` / `LTD` / `LIMITED` / `LLP` / `&` / punctuation differences disappear and
+  "Acme Foods Pvt Ltd" matches "Acme Foods Limited" outright - no fuzzy comparison is
+  even needed for those.
+- **A name disagreement is never an accusation.** An unfamiliar abbreviation, a
+  trading name, a group company or a misread label all look exactly like a swapped
+  CIN, so the flag asks the user to confirm on the portal. It never says the label is
+  fake, and it is never `fail`.
+
+Both status rules exist because of the same failure mode: a company that is not
+active (or not recorded as active) must never be presented as a confirmed active
+maker.
 
 Values below are illustrative - build the UI from the shapes, not the numbers.
 
@@ -256,8 +270,61 @@ doubts at once: the identity is unconfirmed *and* the record is not Active:
 }
 ```
 
+`MCA_NAME_MISMATCH` - the CIN is real, but the printed name is a different company.
+Note the evidence carries **both** names, and the wording asks rather than accuses:
+
+```json
+{
+  "id": "company",
+  "status": "warn",
+  "flags": [
+    {
+      "code": "MCA_NAME_MISMATCH",
+      "severity": "medium",
+      "en": "This CIN is registered to 'ACME FOODS PRIVATE LIMITED', which does not match the manufacturer name printed on the label ('GLOBEX TRADERS'). The CIN may be correct and the name abbreviated, or these may be different companies - confirm on the MCA portal before trusting the maker's claim.",
+      "hi": "यह CIN 'ACME FOODS PRIVATE LIMITED' के नाम पर पंजीकृत है, जो लेबल पर छपे निर्माता के नाम ('GLOBEX TRADERS') से मेल नहीं खाता। हो सकता है CIN सही हो और नाम संक्षिप्त हो, या ये अलग कंपनियाँ हों - निर्माता के दावे पर भरोसा करने से पहले MCA पोर्टल पर पुष्टि करें।",
+      "evidence": {
+        "cin": "U15100MH2009PTC123456",
+        "registry_name": "ACME FOODS PRIVATE LIMITED",
+        "manufacturer": "GLOBEX TRADERS",
+        "name_similarity": 0.0833,
+        "status": "Active",
+        "matched_on": "cin"
+      }
+    }
+  ]
+}
+```
+
+`MCA_NAME_ONLY_MATCH_STATUS_UNKNOWN` - a name match on a record with no status. The
+wording deliberately never says "not Active": the export says nothing, and
+"unknown" and "inactive" are different statements:
+
+```json
+{
+  "id": "company",
+  "status": "warn",
+  "flags": [
+    {
+      "code": "MCA_NAME_ONLY_MATCH_STATUS_UNKNOWN",
+      "severity": "medium",
+      "en": "The manufacturer name matched an MCA record by name only, and that record has no company status recorded, so the register cannot confirm whether it is still Active. Confirm the CIN: the name match may be a different company.",
+      "hi": "निर्माता का नाम MCA रिकॉर्ड से केवल नाम के आधार पर मिला है, और उस रिकॉर्ड में कंपनी की स्थिति दर्ज नहीं है, इसलिए रजिस्टर यह पुष्टि नहीं कर सकता कि यह अब भी Active है। CIN की पुष्टि करें: नाम का मिलान किसी और कंपनी का हो सकता है।",
+      "evidence": {
+        "manufacturer": "ACME FOODS PRIVATE LIMITED",
+        "cin": "U15100MH2009PTC123456",
+        "status": null,
+        "similarity": 0.91,
+        "matched_on": "name"
+      }
+    }
+  ]
+}
+```
+
 > **`company: "pass"` means "this CIN is a real, active entry in the snapshot you
-> imported".** The snapshot is a dated export, so it can lag, and a match is not a
+> imported, and the name printed on the label is that company's name".** The snapshot
+> is a dated export, so it can lag, and a match is not a
 > statement that the label itself is genuine. `"not_checked"` is never a failure,
 > and `"fail"` is deliberately not produced by this check at all.
 

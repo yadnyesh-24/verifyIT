@@ -318,6 +318,80 @@ def test_find_by_cin_unknown_returns_none(conn) -> None:
     assert mca.find_by_cin("   ", conn=conn) is None
 
 
+def test_find_by_cin_without_a_name_has_no_comparison(conn) -> None:
+    """No printed name -> nothing to compare, and the row says so explicitly."""
+    row = mca.find_by_cin("TESTFIXTURE-CIN-0001", conn=conn)
+    assert row is not None
+    assert row["name_similarity"] is None
+
+
+def test_find_by_cin_compares_the_printed_name_in_the_same_statement(conn) -> None:
+    """The name comparison ships with the CIN lookup, so it cannot fail alone.
+
+    Real database, real ``pg_trgm``: this is the metric ``check_company`` relies on
+    to refuse a CIN pass when the printed maker name is a different company.
+    """
+    same = mca.find_by_cin(
+        "TESTFIXTURE-CIN-0001", name="Test Fixture Foods Pvt. Ltd.", conn=conn
+    )
+    assert same is not None
+    assert same["name_similarity"] == 1.0  # legal-form tokens are normalised away
+
+    other = mca.find_by_cin(
+        "TESTFIXTURE-CIN-0001", name="Completely Unrelated Chemicals", conn=conn
+    )
+    assert other is not None
+    assert other["name_similarity"] < providers.CIN_NAME_MATCH_THRESHOLD
+
+
+def test_match_company_carries_name_similarity_for_a_cin_hit(conn) -> None:
+    """A CIN hit hands the caller the comparison it needs, not just the row."""
+    row = mca.match_company(
+        cin="TESTFIXTURE-CIN-0001", name="Test Fixture Foods Ltd", conn=conn
+    )
+    assert row is not None
+    assert row["matched_on"] == "cin"
+    assert row["name_similarity"] == 1.0
+
+
+def test_check_company_refuses_a_pass_when_the_real_similarity_is_low(
+    conn, monkeypatch
+) -> None:
+    """Whole path, real ``pg_trgm``: the CIN is right but the printed name is not.
+
+    Only the connection is injected, so ``check_company`` -> ``match_company`` ->
+    ``find_by_cin`` -> ``similarity()`` all run for real. The mocked tests in
+    ``tests/test_providers.py`` assert the policy; this one shows the policy is
+    reachable with the actual database.
+    """
+    real_match_company = mca.match_company
+
+    def _match_company_with_conn(*, name=None, cin=None):
+        return real_match_company(name=name, cin=cin, conn=conn)
+
+    monkeypatch.setattr(providers.mca, "match_company", _match_company_with_conn)
+
+    conflicting = providers.check_company(
+        manufacturer_name="Completely Unrelated Chemicals",
+        cin="TESTFIXTURE-CIN-0001",
+    )
+    assert conflicting["status"] == "warn"
+    flag = conflicting["flags"][0]
+    assert flag["code"] == "MCA_NAME_MISMATCH"
+    assert flag["evidence"]["registry_name"] == "TEST FIXTURE FOODS PRIVATE LIMITED"
+    assert flag["evidence"]["manufacturer"] == "Completely Unrelated Chemicals"
+    assert flag["evidence"]["name_similarity"] < providers.CIN_NAME_MATCH_THRESHOLD
+
+    # The same CIN with the register's own name still passes - the new check is
+    # not a blanket downgrade of every CIN hit.
+    agreeing = providers.check_company(
+        manufacturer_name="Test Fixture Foods Pvt. Ltd.",
+        cin="TESTFIXTURE-CIN-0001",
+    )
+    assert agreeing["status"] == "pass"
+    assert agreeing["flags"] == []
+
+
 def test_search_by_name_ignores_legal_suffixes(conn) -> None:
     rows = mca.search_by_name("Test Fixture Foods Pvt. Ltd.", conn=conn)
     assert rows[0]["cin"] == "TESTFIXTURE-CIN-0001"
@@ -379,14 +453,22 @@ def _match(
     status: str | None = "Active",
     similarity: float = 1.0,
     matched_on: str = "cin",
+    name_similarity: float | None = None,
 ) -> dict:
-    """Build a matcher result with the shape ``backend.mca`` produces."""
+    """Build a matcher result with the shape ``backend.mca`` produces.
+
+    ``name_similarity`` mirrors the extra column ``mca.find_by_cin`` computes when a
+    printed name is supplied: the ``pg_trgm`` similarity between the normalised
+    printed name and the register row's own name. ``None`` means the lookup had no
+    name to compare against.
+    """
     return {
         "cin": cin,
         "name": name,
         "status": status,
         "similarity": similarity,
         "matched_on": matched_on,
+        "name_similarity": name_similarity,
     }
 
 
@@ -544,12 +626,44 @@ def test_check_company_name_only_match_on_a_struck_off_record(
 def test_check_company_name_only_match_without_a_status(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A name match with no recorded status is unknown, not "Active"."""
+    """A missing status is *unknown*, never "not Active".
+
+    The snapshot not recording a status is a gap in the export, not a statement
+    that the company is inactive - and the name-only match means the identity is
+    unconfirmed too. Both doubts have to be visible.
+    """
     _stub_match(monkeypatch, _match(status=None, similarity=0.9, matched_on="name"))
     check = providers.check_company(manufacturer_name="Test Fixture Mills Ltd")
+    assert check["status"] == "warn"
     flag = check["flags"][0]
-    assert flag["code"] == "MCA_NAME_ONLY_MATCH_NOT_ACTIVE"
-    assert "no status recorded" in flag["en"]
+    assert flag["code"] == "MCA_NAME_ONLY_MATCH_STATUS_UNKNOWN"
+    assert flag["severity"] == "medium"
+    lowered = flag["en"].lower()
+    # It must not assert inactivity the export does not state ...
+    assert "not active" not in lowered
+    assert "inactive" not in lowered
+    # ... while still naming the unconfirmed name-only identity as the reason to check.
+    assert "by name only" in lowered
+    assert "confirm the cin" in lowered
+    assert flag["evidence"]["status"] is None
+    assert flag["evidence"]["matched_on"] == "name"
+    assert flag["hi"]  # both languages present
+
+
+def test_name_only_status_distinguishes_explicit_from_unknown(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An explicitly non-active record and a status-less one are different statements."""
+    _stub_match(monkeypatch, _match(status="Strike Off", similarity=0.9, matched_on="name"))
+    explicit = providers.check_company(manufacturer_name="Test Fixture Mills Ltd")["flags"][0]
+
+    _stub_match(monkeypatch, _match(status=None, similarity=0.9, matched_on="name"))
+    unknown = providers.check_company(manufacturer_name="Test Fixture Mills Ltd")["flags"][0]
+
+    assert explicit["code"] == "MCA_NAME_ONLY_MATCH_NOT_ACTIVE"
+    assert unknown["code"] == "MCA_NAME_ONLY_MATCH_STATUS_UNKNOWN"
+    assert "not Active" in explicit["en"]
+    assert "not active" not in unknown["en"].lower()
 
 
 def test_name_only_struck_off_no_longer_scores_eighty_at_low_risk(
@@ -608,3 +722,145 @@ def test_verify_company_pass_flows_through_the_api(
     assert data["checks_ran"] == 1
     assert data["score"] == 100
     assert data["verdict"] == "low_risk"
+
+
+# --- CIN + printed manufacturer name consistency ------------------------------
+#
+# MOCKED: the matcher is stubbed, so these assert *policy* - what the check does
+# with a CIN hit whose printed name disagrees - not the real register's contents.
+
+
+def test_cin_with_a_matching_printed_name_passes(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The ordinary legal-form variation reconciles, so the CIN pass stands."""
+    _stub_match(monkeypatch, _match(name_similarity=1.0))
+    check = providers.check_company(
+        manufacturer_name="Test Fixture Foods Pvt. Ltd.",
+        cin="TESTFIXTURE-CIN-0001",
+    )
+    assert check["status"] == "pass"
+    assert check["flags"] == []
+
+
+def test_legal_suffix_variation_never_reaches_the_similarity_test(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """``normalize_name`` drops PVT/LTD/LIMITED, so the comparison is an exact match.
+
+    The stubbed similarity is deliberately 0.0: reconciliation must come from
+    normalisation alone, so a suffix variation can never be flagged just because a
+    trigram score came out low.
+    """
+    _stub_match(monkeypatch, _match(name_similarity=0.0))
+    check = providers.check_company(
+        manufacturer_name="Test Fixture Foods Limited",
+        cin="TESTFIXTURE-CIN-0001",
+    )
+    assert check["status"] == "pass"
+    assert check["flags"] == []
+
+
+def test_cin_with_a_conflicting_printed_name_does_not_pass(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A real CIN must not carry a different company's printed name to a pass."""
+    _stub_match(monkeypatch, _match(name_similarity=0.11))
+    check = providers.check_company(
+        manufacturer_name="Completely Unrelated Chemicals",
+        cin="TESTFIXTURE-CIN-0001",
+    )
+    assert check["status"] == "warn"
+    flag = check["flags"][0]
+    assert flag["code"] == "MCA_NAME_MISMATCH"
+    assert flag["severity"] == "medium"
+    assert flag["en"] and flag["hi"]
+    # Evidence carries BOTH names so the user can compare them.
+    assert flag["evidence"]["manufacturer"] == "Completely Unrelated Chemicals"
+    assert flag["evidence"]["registry_name"] == "TEST FIXTURE FOODS PRIVATE LIMITED"
+    assert flag["evidence"]["cin"] == "TESTFIXTURE-CIN-0001"
+    assert flag["evidence"]["name_similarity"] == 0.11
+    assert flag["evidence"]["matched_on"] == "cin"
+    # It asks for confirmation; it does not accuse anyone of anything.
+    lowered = flag["en"].lower()
+    assert "fraud" not in lowered and "fake" not in lowered
+    assert "confirm on the mca portal" in lowered
+
+
+def test_cin_without_a_printed_name_is_unaffected(monkeypatch: pytest.MonkeyPatch) -> None:
+    """Nothing to compare -> the CIN alone still settles identity."""
+    _stub_match(monkeypatch, _match(name_similarity=None))
+    check = providers.check_company(cin="TESTFIXTURE-CIN-0001")
+    assert check["status"] == "pass"
+    assert check["flags"] == []
+
+
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+def test_cin_with_a_blank_printed_name_is_unaffected(
+    monkeypatch: pytest.MonkeyPatch, blank: str
+) -> None:
+    """A blank form field is not a conflicting name."""
+    _stub_match(monkeypatch, _match(name_similarity=0.05))
+    check = providers.check_company(
+        manufacturer_name=blank, cin="TESTFIXTURE-CIN-0001"
+    )
+    assert check["status"] == "pass"
+
+
+def test_unfamiliar_abbreviation_requires_confirmation_not_a_false_claim(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """An abbreviation scores below the threshold -> warn, never `fail`."""
+    _stub_match(
+        monkeypatch,
+        _match(
+            name="TEST FIXTURE AGRO INDUSTRIES LIMITED",
+            name_similarity=providers.CIN_NAME_MATCH_THRESHOLD - 0.01,
+        ),
+    )
+    check = providers.check_company(
+        manufacturer_name="T.F. Agro Inds", cin="TESTFIXTURE-CIN-0003"
+    )
+    assert check["status"] == "warn"
+    assert check["flags"][0]["code"] == "MCA_NAME_MISMATCH"
+
+
+def test_name_similarity_at_the_threshold_reconciles(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The threshold is inclusive, and it is the same one the matcher uses."""
+    assert providers.CIN_NAME_MATCH_THRESHOLD == mca.NAME_MATCH_THRESHOLD
+    _stub_match(
+        monkeypatch, _match(name_similarity=providers.CIN_NAME_MATCH_THRESHOLD)
+    )
+    check = providers.check_company(
+        manufacturer_name="Test Fixture Foooods Ltd", cin="TESTFIXTURE-CIN-0001"
+    )
+    assert check["status"] == "pass"
+
+
+def test_cin_inactive_and_conflicting_name_reports_both_flags(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The name and the status are independent findings, so both are reported."""
+    _stub_match(monkeypatch, _match(status="Strike Off", name_similarity=0.1))
+    check = providers.check_company(
+        manufacturer_name="Someone Else Ltd", cin="TESTFIXTURE-CIN-0001"
+    )
+    assert check["status"] == "warn"
+    assert [f["code"] for f in check["flags"]] == [
+        "MCA_NAME_MISMATCH",
+        "MCA_COMPANY_NOT_ACTIVE",
+    ]
+
+
+def test_conflicting_name_no_longer_scores_a_hundred_at_low_risk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """End to end: an active CIN with the wrong printed name used to score 100."""
+    _stub_match(monkeypatch, _match(name_similarity=0.1))
+    result = providers.build_verification(
+        manufacturer_name="Completely Unrelated Chemicals",
+        cin="TESTFIXTURE-CIN-0001",
+    )
+    assert result["checks_ran"] == 1
+    assert result["score"] == 50  # the 40-point company check keeps half its credit
+    assert result["verdict"] == providers.VERDICT_MEDIUM_RISK

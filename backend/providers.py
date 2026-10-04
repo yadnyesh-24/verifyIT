@@ -239,6 +239,12 @@ def _verdict_for_score(score: int) -> str:
 #: silently passing.
 MCA_ACTIVE_STATUSES = frozenset({"ACTIVE", "ACTV"})
 
+#: Similarity below which a printed manufacturer name is treated as *not* the same
+#: company as an exact CIN match. It deliberately reuses the name-only matcher's
+#: threshold: one number governs "these two names are the same company", whether
+#: the comparison comes from a fuzzy search or from a cross-check against a CIN.
+CIN_NAME_MATCH_THRESHOLD = mca.NAME_MATCH_THRESHOLD
+
 
 def _is_active_status(status: str) -> bool:
     """Return ``True`` when an MCA company status means the company is active."""
@@ -277,6 +283,46 @@ def _mca_not_active_flag(match: dict[str, Any]) -> dict[str, Any]:
             "cin": match.get("cin"),
             "name": match.get("name"),
             "status": status,
+            "matched_on": "cin",
+        },
+    }
+
+
+def _mca_name_cin_mismatch_flag(
+    match: dict[str, Any],
+    supplied_name: str,
+    similarity: float,
+) -> dict[str, Any]:
+    """Medium-severity flag: the CIN is real, but the printed name is a different company.
+
+    Deliberately **not** an accusation. A printed name can differ for entirely
+    harmless reasons - an unfamiliar abbreviation, a trading name, a group
+    company, or a reader that misread the label - so the flag asks the user to
+    confirm the CIN on the portal rather than declaring anything false.
+    """
+    registry_name = match.get("name")
+    return {
+        "code": "MCA_NAME_MISMATCH",
+        "severity": "medium",
+        "en": (
+            f"This CIN is registered to '{registry_name}', which does not match the "
+            f"manufacturer name printed on the label ('{supplied_name}'). The CIN may "
+            "be correct and the name abbreviated, or these may be different "
+            "companies - confirm on the MCA portal before trusting the maker's claim."
+        ),
+        "hi": (
+            f"यह CIN '{registry_name}' के नाम पर पंजीकृत है, जो लेबल पर छपे निर्माता के नाम "
+            f"('{supplied_name}') से मेल नहीं खाता। हो सकता है CIN सही हो और नाम संक्षिप्त "
+            "हो, या ये अलग कंपनियाँ हों - निर्माता के दावे पर भरोसा करने से पहले MCA पोर्टल "
+            "पर पुष्टि करें।"
+        ),
+        "evidence": {
+            "cin": match.get("cin"),
+            # Both names, so the user can compare them without re-reading the label.
+            "registry_name": registry_name,
+            "manufacturer": supplied_name,
+            "name_similarity": similarity,
+            "status": match.get("status"),
             "matched_on": "cin",
         },
     }
@@ -333,29 +379,32 @@ def _mca_status_unknown_flag(match: dict[str, Any]) -> dict[str, Any]:
 
 
 def _mca_name_only_not_active_flag(match: dict[str, Any]) -> dict[str, Any]:
-    """Medium-severity flag: a name-only match whose record is not Active.
+    """Medium-severity flag: a name-only match whose record is *explicitly* not Active.
+
+    Reserved for a status the register actually records (Strike Off, Under
+    Liquidation, ...). A missing status has its own flag
+    (``MCA_NAME_ONLY_MATCH_STATUS_UNKNOWN``), because "not Active" and "not
+    recorded" are different statements and only one of them is in the snapshot.
 
     Two separate doubts are reported together, because either one alone would
     understate the situation: the match is by name (so the identity is
     unconfirmed) *and* the record it matched is not Active.
     """
-    status = _recorded_status(match)
-    status_en = f"recorded as '{status}'" if status else "no status recorded"
-    status_hi = f"दर्ज स्थिति '{status}'" if status else "कोई स्थिति दर्ज नहीं"
+    status = _recorded_status(match) or "unknown"
     return {
         "code": "MCA_NAME_ONLY_MATCH_NOT_ACTIVE",
         "severity": "medium",
         "en": (
             "The manufacturer name matched an MCA record by name only, and that "
-            f"record is not Active ({status_en}). Confirm the CIN: a name match may "
-            "be a different company, and if it is the same one its registration may "
-            "no longer be active."
+            f"record is not Active (recorded as '{status}'). Confirm the CIN: a name "
+            "match may be a different company, and if it is the same one its "
+            "registration may no longer be active."
         ),
         "hi": (
             "निर्माता का नाम MCA रिकॉर्ड से केवल नाम के आधार पर मिला है, और वह रिकॉर्ड "
-            f"Active नहीं है ({status_hi})। CIN की पुष्टि करें: नाम का मिलान किसी और "
-            "कंपनी का हो सकता है, और यदि वही कंपनी है तो उसका पंजीकरण अब सक्रिय नहीं "
-            "हो सकता।"
+            f"Active नहीं है (दर्ज स्थिति '{status}')। CIN की पुष्टि करें: नाम का मिलान "
+            "किसी और कंपनी का हो सकता है, और यदि वही कंपनी है तो उसका पंजीकरण अब सक्रिय "
+            "नहीं हो सकता।"
         ),
         "evidence": {
             "manufacturer": match.get("name"),
@@ -365,6 +414,77 @@ def _mca_name_only_not_active_flag(match: dict[str, Any]) -> dict[str, Any]:
             "matched_on": "name",
         },
     }
+
+
+def _mca_name_only_status_unknown_flag(match: dict[str, Any]) -> dict[str, Any]:
+    """Medium-severity flag: a name-only match whose record has no status recorded.
+
+    Two doubts at once, and neither of them is the claim "this company is
+    inactive": the match is by name (so the identity is unconfirmed) *and* the
+    snapshot records no status for that record (so it cannot be confirmed as
+    Active either). Reporting "not Active" here would assert something the export
+    does not say, and would read as an accusation rather than a gap.
+    """
+    return {
+        "code": "MCA_NAME_ONLY_MATCH_STATUS_UNKNOWN",
+        "severity": "medium",
+        "en": (
+            "The manufacturer name matched an MCA record by name only, and that "
+            "record has no company status recorded, so the register cannot confirm "
+            "whether it is still Active. Confirm the CIN: the name match may be a "
+            "different company."
+        ),
+        "hi": (
+            "निर्माता का नाम MCA रिकॉर्ड से केवल नाम के आधार पर मिला है, और उस रिकॉर्ड में "
+            "कंपनी की स्थिति दर्ज नहीं है, इसलिए रजिस्टर यह पुष्टि नहीं कर सकता कि यह अब "
+            "भी Active है। CIN की पुष्टि करें: नाम का मिलान किसी और कंपनी का हो सकता है।"
+        ),
+        "evidence": {
+            "manufacturer": match.get("name"),
+            "cin": match.get("cin"),
+            "status": match.get("status"),
+            "similarity": match.get("similarity"),
+            "matched_on": "name",
+        },
+    }
+
+
+def _cin_name_conflict(
+    match: dict[str, Any],
+    supplied_name: str | None,
+) -> dict[str, Any] | None:
+    """Return a mismatch flag when a printed name cannot be reconciled with the CIN.
+
+    ``None`` means there is nothing to judge: no printed name, no register name,
+    or the two names are the same company.
+
+    Legal-form tokens are dropped by ``mca.normalize_name`` on both sides before
+    anything is measured, so an ordinary suffix variation ("Acme Foods Pvt Ltd"
+    vs "Acme Foods Limited") is an *exact* match and never reaches the similarity
+    test at all. Only names that still differ need the trigram comparison, which
+    ``mca.find_by_cin`` computes in the same statement as the lookup.
+
+    An unfamiliar abbreviation lands between the two: its similarity is low, so it
+    is flagged for confirmation rather than declared false - which is exactly what
+    the message asks the user to do.
+    """
+    supplied = (supplied_name or "").strip()
+    registry_name = match.get("name")
+    if not supplied or not registry_name:
+        return None
+
+    if mca.normalize_name(supplied) == mca.normalize_name(str(registry_name)):
+        return None
+
+    similarity = match.get("name_similarity")
+    if similarity is None:
+        # Only reachable when the lookup ran without a name to compare against.
+        return None
+    similarity = round(float(similarity), 4)
+    if similarity >= CIN_NAME_MATCH_THRESHOLD:
+        return None
+
+    return _mca_name_cin_mismatch_flag(match, supplied, similarity)
 
 
 def check_company(
@@ -382,18 +502,26 @@ def check_company(
     Outcomes - deliberately conservative, following the same discipline as the
     FSSAI check ("a valid format is not a valid licence"):
 
-    * **CIN found in the register** -> ``pass`` *only* when the recorded status is
-      Active. A status that is present but not Active (Strike Off, Under
-      Liquidation, ...) is ``warn`` with a high-severity ``MCA_COMPANY_NOT_ACTIVE``
-      flag, and a **missing** status is ``warn`` with a medium-severity
-      ``MCA_COMPANY_STATUS_UNKNOWN`` flag. An exact CIN proves that the register
-      *contains* the company - never that it is still live.
+    * **CIN found in the register** -> ``pass`` only when *both* hold: the recorded
+      status is Active **and** any manufacturer name supplied with the CIN
+      reconciles with the name the register holds for it. Otherwise ``warn``:
+      - status present but not Active (Strike Off, Under Liquidation, ...) ->
+        high-severity ``MCA_COMPANY_NOT_ACTIVE``;
+      - **no** status recorded -> medium-severity ``MCA_COMPANY_STATUS_UNKNOWN``;
+      - a printed name that is not the register's name for that CIN ->
+        medium-severity ``MCA_NAME_MISMATCH``. This is never an accusation: a
+        trading name, a group company or an unfamiliar abbreviation looks exactly
+        like a swapped CIN, so the flag asks for confirmation on the portal.
+
+      The two findings are independent and are reported together - a struck-off
+      company whose printed name also disagrees carries both flags.
     * **Name matched fuzzily only** -> ``warn``, never ``pass``: a name is not
-      unique, so the user must confirm the CIN. The flag also reflects the matched
-      record's status - ``MCA_NAME_ONLY_MATCH`` (low) when that record is Active,
-      ``MCA_NAME_ONLY_MATCH_NOT_ACTIVE`` (medium) when it is not Active or has no
-      recorded status. A name-only hit on a struck-off record is therefore never
-      reported as low risk.
+      unique, so the user must confirm the CIN. The flag reflects what the matched
+      record actually says: ``MCA_NAME_ONLY_MATCH`` (low) when it is Active,
+      ``MCA_NAME_ONLY_MATCH_NOT_ACTIVE`` (medium) when it is *explicitly* not
+      Active, and ``MCA_NAME_ONLY_MATCH_STATUS_UNKNOWN`` (medium) when the register
+      records no status at all. A missing status is never reported as "inactive" -
+      that would assert something the export does not say.
     * **No confident match, or no snapshot available** -> ``not_checked``. A miss
       is never reported as a failure: the snapshot is a fixed export and may lag,
       so absence proves nothing.
@@ -411,22 +539,35 @@ def check_company(
     is_active = status is not None and _is_active_status(status)
 
     if match["matched_on"] == "cin":
-        # The CIN settles identity; only the recorded status decides pass vs warn.
+        # An exact CIN settles which *record* this is, but not that the label is
+        # describing it: the printed name and the recorded status are separate
+        # questions, and a clean pass needs both answered.
+        flags: list[dict[str, Any]] = []
+
+        conflict = _cin_name_conflict(match, manufacturer_name)
+        if conflict is not None:
+            flags.append(conflict)
+
         if status is None:
-            check["status"] = STATUS_WARN
-            check["flags"].append(_mca_status_unknown_flag(match))
+            flags.append(_mca_status_unknown_flag(match))
         elif not is_active:
+            flags.append(_mca_not_active_flag(match))
+
+        if flags:
             check["status"] = STATUS_WARN
-            check["flags"].append(_mca_not_active_flag(match))
+            check["flags"] = flags
         else:
             check["status"] = STATUS_PASS
         return check
 
-    # A name is not unique, so a name match can never pass - but the matched
-    # record's status must still be reported when it is not Active.
+    # A name is not unique, so a name match can never pass - but what the matched
+    # record actually says about its status must still be reported, without
+    # dressing a missing status up as "inactive".
     check["status"] = STATUS_WARN
     if is_active:
         check["flags"].append(_mca_name_only_flag(match))
+    elif status is None:
+        check["flags"].append(_mca_name_only_status_unknown_flag(match))
     else:
         check["flags"].append(_mca_name_only_not_active_flag(match))
     return check
