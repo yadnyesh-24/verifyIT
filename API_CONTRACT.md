@@ -10,11 +10,14 @@ in `backend/main.py` and `backend/providers.py`. Written for frontend consumers.
 - **Frozen mock data:** [`samples/`](samples/) — kept in sync by
   `tests/test_samples.py`.
 
-> **Registry status.** No registry provider is connected yet and the backend
-> makes **no external network calls**. Every check therefore returns
-> `status: "not_checked"`, `score: null` and `verdict: "not_checked"`. No real or
-> fake registry data is returned. The only real signal today is the
-> deterministic FSSAI **format** check.
+> **Registry status.** The backend makes **no external network calls**. The
+> `company` check reads a *local* PostgreSQL snapshot of the MCA *Company Master
+> Data* register when the team has imported one (see
+> **[`MCA_SETUP.md`](MCA_SETUP.md)**); with no snapshot - or with no confident
+> match - it returns `status: "not_checked"`. FSSAI/BIS, Surepass and the OCR
+> pipeline are not connected. `score` stays `null` and `verdict` stays
+> `"not_checked"`: one resolvable check is not a whole-label verdict. No real or
+> fake registry data is ever invented.
 
 ## Endpoints
 
@@ -125,6 +128,73 @@ A supplied `fssai` that is **not exactly 14 ASCII digits** adds a
 > **A valid format is NOT a valid licence.** `{"fssai":"10012022000123"}`
 > produces **no flag** and leaves `licence.status` at `"not_checked"`. Never
 > present a format-valid number as "verified".
+
+## The second real signal: the `company` check vs the local MCA snapshot
+
+Once the team has imported an MCA *Company Master Data* snapshot (see
+[`MCA_SETUP.md`](MCA_SETUP.md)) the `company` check can resolve. Without a
+snapshot, or without a confident match, it stays `"not_checked"`.
+
+| Situation | `status` | Flags |
+| --------- | -------- | ----- |
+| `cin` is in the register and the recorded status is Active | `"pass"` | none |
+| `cin` is in the register but the status is not Active (e.g. `Strike Off`) | `"warn"` | `MCA_COMPANY_NOT_ACTIVE` (high) |
+| only the `manufacturer` name matched, fuzzily (similarity >= 0.62) | `"warn"` | `MCA_NAME_ONLY_MATCH` (low) |
+| no match, no snapshot, or a company the snapshot does not contain | `"not_checked"` | none - a miss is **never** a failure |
+
+Values below are illustrative - build the UI from the shapes, not the numbers.
+
+`MCA_NAME_ONLY_MATCH` - the name matched, but a name is not a unique identifier:
+
+```json
+{
+  "id": "company",
+  "status": "warn",
+  "flags": [
+    {
+      "code": "MCA_NAME_ONLY_MATCH",
+      "severity": "low",
+      "en": "The manufacturer name was found in the MCA register by name only - confirm the CIN to be sure it is the same company.",
+      "hi": "निर्माता का नाम MCA रजिस्टर में केवल नाम के आधार पर मिला है - एक ही कंपनी होने की पुष्टि के लिए CIN जाँचें।",
+      "evidence": {
+        "manufacturer": "ACME FOODS PRIVATE LIMITED",
+        "cin": "U15100MH2009PTC123456",
+        "status": "Active",
+        "similarity": 1.0,
+        "matched_on": "name"
+      }
+    }
+  ]
+}
+```
+
+`MCA_COMPANY_NOT_ACTIVE` - the CIN is real, but the company is not active:
+
+```json
+{
+  "id": "company",
+  "status": "warn",
+  "flags": [
+    {
+      "code": "MCA_COMPANY_NOT_ACTIVE",
+      "severity": "high",
+      "en": "MCA records show this company as 'Strike Off', not Active - treat the maker's claim on this label with caution.",
+      "hi": "MCA रिकॉर्ड में यह कंपनी 'Strike Off' दर्ज है, Active नहीं - लेबल पर दिए निर्माता के दावे को सावधानी से लें।",
+      "evidence": {
+        "cin": "U15100MH2009PTC123456",
+        "name": "ACME FOODS PRIVATE LIMITED",
+        "status": "Strike Off",
+        "matched_on": "cin"
+      }
+    }
+  ]
+}
+```
+
+> **`company: "pass"` means "this CIN is a real, active entry in the snapshot you
+> imported".** The snapshot is a dated export, so it can lag, and a match is not a
+> statement that the label itself is genuine. `"not_checked"` is never a failure,
+> and `"fail"` is deliberately not produced by this check at all.
 
 ## Displaying statuses
 

@@ -26,5 +26,11 @@ yarn-error.log*
 uploads/
 **/uploads/
 
+# Local registry snapshots / government exports (large, re-downloadable)
+data/
+*.csv
+!samples/*.csv
+*.zip
+
 # OS / editor cruft
 .DS_Store

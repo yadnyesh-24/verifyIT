@@ -1,8 +1,10 @@
 # Frontend handoff — for Yadnyesh
 
 Everything you need to build the UI **without waiting on the backend**. The
-backend already returns the exact contract below (with honest `not_checked`
-placeholders, because the registries are not connected yet).
+backend already returns the exact contract below. Most checks are honest
+`not_checked` placeholders because the registries are not connected yet; the
+`company` check is the exception - it resolves once the team imports the MCA
+snapshot (see [`MCA_SETUP.md`](MCA_SETUP.md)), so build it for every status.
 
 - **Base URL (local):** `http://127.0.0.1:8001`
 - **CORS:** `http://localhost:3000` and `http://127.0.0.1:3000` are allowed.
@@ -87,6 +89,23 @@ curl -X POST http://127.0.0.1:8001/api/verify \
 Use [`samples/verify_response_fssai_invalid.json`](samples/verify_response_fssai_invalid.json)
 to build and demo the flag UI. **A valid format is not a verified licence** —
 never show "Verified" for it.
+
+### The `company` check can now answer (two new flag codes)
+
+Once the MCA snapshot is imported the `company` check returns real statuses. Build
+this now - the `samples/` fixtures must match the API exactly, and they stay
+`not_checked` because no snapshot exists in the sample run.
+
+| `company.status` | Meaning | What to render |
+| ---------------- | ------- | -------------- |
+| `pass` | The CIN is a real, **Active** entry in the imported MCA snapshot | Success card: "Found in the MCA register" |
+| `warn` + `MCA_NAME_ONLY_MATCH` (low) | Only the name matched, fuzzily | "Name found in MCA - confirm the CIN" |
+| `warn` + `MCA_COMPANY_NOT_ACTIVE` (high) | The CIN is real but not Active (e.g. `Strike Off`) | Caution card showing the recorded status |
+| `not_checked` | No snapshot, or no confident match | "Verification pending" - **not** a failure |
+
+`evidence` carries `similarity` (0-1), `cin`, `name`, `status` and `matched_on`
+(`"cin"` or `"name"`). Exact shapes and both flag messages (English + Hindi) are
+in [`API_CONTRACT.md`](API_CONTRACT.md#the-second-real-signal-the-company-check-vs-the-local-mca-snapshot).
 
 ## Environment
 

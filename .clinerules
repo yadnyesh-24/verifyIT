@@ -6,13 +6,19 @@ These rules apply to every Cline task in this repository. Keep them in sync with
 
 ## Project
 - **Verify It** - hackathon label-verification backend.
-- Python 3.11 + FastAPI + Uvicorn. Dependencies are pinned in `requirements.txt`
-  (runtime) and `requirements-dev.txt` (tests/tooling).
+- Python 3.11 + FastAPI + Uvicorn + psycopg 3. Dependencies are pinned in
+  `requirements.txt` (runtime) and `requirements-dev.txt` (tests/tooling).
 - Layout:
   - `backend/main.py` - FastAPI app: routes, Pydantic schemas, CORS.
   - `backend/providers.py` - the single place where registry providers
-    (company/CIN, FSSAI, BIS, Surepass) and the OCR pipeline get integrated.
+    (company/CIN, FSSAI, BIS, Surepass) and the OCR pipeline get integrated, and
+    the only place that decides a check status or builds a flag.
+  - `backend/db.py` - the only place that opens a database connection.
+  - `backend/mca.py` - MCA Company Master Data matching (`pg_trgm` + exact CIN).
+  - `sql/001_companies.sql` - the registry schema (idempotent).
+  - `scripts/import_mca.py` - importer for the local registry snapshot.
   - `tests/` - pytest tests; `samples/` - frozen frontend mock responses.
+  - `data/` - local registry exports (git-ignored, never committed).
 
 ## API contract (frozen - change only with docs + tests + samples)
 - `GET /api/health` -> `{"status":"ok","app":"Verify It"}`.
@@ -22,14 +28,32 @@ These rules apply to every Cline task in this repository. Keep them in sync with
 - `checks` is always exactly three, in order: `company`, `licence`, `label_law`.
 - A check status is one of `pass`, `warn`, `fail`, `not_checked`.
 - A flag is `{code, severity, en, hi, evidence}`; `severity` is `high|medium|low`.
+  Known codes: `FSSAI_FORMAT_INVALID` (licence), `MCA_COMPANY_NOT_ACTIVE` and
+  `MCA_NAME_ONLY_MATCH` (company). `evidence` must stay JSON-serialisable.
+- The `company` check: exact `cin` hit with an Active status -> `pass`; a non-Active
+  status or a fuzzy name-only hit -> `warn`; anything else -> `not_checked`. It
+  never returns `fail`.
 - `official_links[]` is `{label, url, copy}` (copy the number, open the portal).
 
 ## Non-negotiable correctness rules
-- **Never invent registry data.** Until a provider is connected, every check is
-  `status: "not_checked"` and `score`/`verdict` stay `null`/`"not_checked"`. No
-  fake companies, licences, CINs, trust scores or verdicts. Ever.
-- **No external network calls** anywhere until the integration lands in
-  `backend/providers.py`. Do not add hidden HTTP calls in routes.
+- **Never invent registry data.** Anything the API reports must come from a real
+  government export (today: the MCA *Company Master Data* snapshot) or from a
+  deterministic check on the label itself. A check whose registry is not connected
+  is `status: "not_checked"`, and `score`/`verdict` stay `null`/`"not_checked"`
+  until every check can run. No fake companies, licences, CINs, trust scores or
+  verdicts. Ever.
+- **A miss is not a failure.** A company absent from the MCA snapshot stays
+  `not_checked` - the snapshot is a dated export and can lag. The `company` check
+  never emits `fail`; `pass` requires an exact CIN whose recorded status is Active.
+- **Synthetic rows stay in tests.** Fixtures live in a session-local
+  `TEMP TABLE companies` with CINs prefixed `TESTFIXTURE`, and the matcher accepts
+  an explicit `conn` for that. Never write synthetic rows into the persistent
+  `companies` table.
+- **No external network calls** anywhere. The one data source is a *local*
+  PostgreSQL snapshot reached through `backend/db.py`; do not add hidden HTTP calls
+  in routes. `backend/db.py` must degrade to "no information" (`None`) when the
+  database is missing or unreachable, so `/api/verify` never 500s because Postgres
+  is down.
 - **`not_checked` is not a failure and not a pass.** It means the check has not
   run yet; the UI renders it as "Verification pending".
 - **FSSAI format = exactly 14 ASCII digits.** Use the compiled regex
@@ -50,7 +74,11 @@ These rules apply to every Cline task in this repository. Keep them in sync with
 - Do not add new runtime dependencies without updating `requirements.txt`.
 
 ## Testing
-- Tests live in `tests/` and run with `./.venv/bin/python -m pytest`.
+- Tests live in `tests/` and run with `./.venv/bin/python -m pytest`. The suite
+  must pass with **no database running** - database-dependent tests skip
+  themselves - so keep pure logic pure and put anything DB-bound behind the skip.
 - Add/extend tests with every behaviour change. Cover: scan with/without file,
   verify empty/no/partial body, valid + invalid FSSAI formats (incl. Unicode
-  digits), CORS, official links, and the "no invented fields" invariant.
+  digits), CORS, official links, the "no invented fields" invariant, MCA name
+  normalisation and matching, the importer's header/date handling, and the
+  `check_company` status mapping (including "never `fail`").

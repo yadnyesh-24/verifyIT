@@ -3,13 +3,17 @@
 This module is the single place where registry providers (company/CIN via MCA or
 Surepass, FSSAI, BIS) and the OCR pipeline will be integrated.
 
-Real registry data, Surepass credentials and the OCR pipeline are not available
-yet, and nothing here performs network I/O. Every registry check therefore
-returns a neutral ``not_checked`` placeholder so the API contract stays stable
-for the frontend. The only signals reported today are *deterministic,
-registry-independent* ones - such as the FSSAI number format - which can be
-checked without contacting any registry. No company, licence or verdict is ever
-invented.
+**No network I/O happens anywhere here.** The one register that can answer today
+is the company/CIN check, and it reads a *local* PostgreSQL snapshot of the MCA
+Company Master Data export that the team imports itself (see ``MCA_SETUP.md``);
+when that snapshot is absent or has no confident match, the check stays
+``not_checked``. FSSAI/BIS, Surepass and the OCR pipeline are not connected, so
+their checks remain neutral ``not_checked`` placeholders - which keeps the API
+contract stable for the frontend.
+
+The only other signals reported today are *deterministic, registry-independent*
+ones, such as the FSSAI number format, which can be checked without contacting
+any registry. No company, licence or verdict is ever invented.
 
 Replace the individual ``check_*`` functions with real integrations when
 credentials and endpoints become available.
@@ -19,6 +23,8 @@ from __future__ import annotations
 
 import re
 from typing import Any
+
+from backend import mca
 
 # --- Status / verdict contract ----------------------------------------------
 
@@ -88,18 +94,112 @@ def _fssai_format_flag(fssai_number: str | None) -> dict[str, Any] | None:
     }
 
 
+# --- Company / CIN (local MCA Company Master Data snapshot) -------------------
+
+#: MCA ``company_status`` values that mean the company is live. A status that is
+#: present but missing from this set (Strike Off, Amalgamated, Under Liquidation,
+#: ...) is reported as a warning instead of silently passing.
+MCA_ACTIVE_STATUSES = frozenset({"ACTIVE"})
+
+
+def _is_active_status(status: str) -> bool:
+    """Return ``True`` when an MCA company status means the company is active."""
+    return status.strip().upper() in MCA_ACTIVE_STATUSES
+
+
+def _mca_not_active_flag(match: dict[str, Any]) -> dict[str, Any]:
+    """High-severity flag: the CIN exists but the MCA status is not Active."""
+    status = match.get("status") or "unknown"
+    return {
+        "code": "MCA_COMPANY_NOT_ACTIVE",
+        "severity": "high",
+        "en": (
+            f"MCA records show this company as '{status}', not Active - treat the "
+            "maker's claim on this label with caution."
+        ),
+        "hi": (
+            f"MCA रिकॉर्ड में यह कंपनी '{status}' दर्ज है, Active नहीं - लेबल पर दिए "
+            "निर्माता के दावे को सावधानी से लें।"
+        ),
+        "evidence": {
+            "cin": match.get("cin"),
+            "name": match.get("name"),
+            "status": status,
+            "matched_on": "cin",
+        },
+    }
+
+
+def _mca_name_only_flag(match: dict[str, Any]) -> dict[str, Any]:
+    """Low-severity flag: the maker name matched the register by name only."""
+    return {
+        "code": "MCA_NAME_ONLY_MATCH",
+        "severity": "low",
+        "en": (
+            "The manufacturer name was found in the MCA register by name only - "
+            "confirm the CIN to be sure it is the same company."
+        ),
+        "hi": (
+            "निर्माता का नाम MCA रजिस्टर में केवल नाम के आधार पर मिला है - एक ही कंपनी "
+            "होने की पुष्टि के लिए CIN जाँचें।"
+        ),
+        "evidence": {
+            "manufacturer": match.get("name"),
+            "cin": match.get("cin"),
+            "status": match.get("status"),
+            "similarity": match.get("similarity"),
+            "matched_on": "name",
+        },
+    }
+
+
 def check_company(
     *,
     manufacturer_name: str | None = None,
     manufacturer_address: str | None = None,
     cin: str | None = None,
 ) -> dict[str, Any]:
-    """Company / CIN registry check.
+    """Company / CIN check against the local MCA registry snapshot.
 
-    Placeholder: returns ``not_checked`` with no flags until the provider is
-    connected. The parameters are accepted now to fix the future signature.
+    The register is a locally imported snapshot of the MCA *Company Master Data*
+    export (``sql/001_companies.sql`` + ``scripts/import_mca.py``, see
+    ``MCA_SETUP.md``). No network request is made, and no record is ever invented.
+
+    Outcomes - deliberately conservative, following the same discipline as the
+    FSSAI check ("a valid format is not a valid licence"):
+
+    * **CIN found in the register** -> ``pass``. A CIN is a unique statutory
+      identifier, so this is a real register record. If the recorded status is
+      present but not Active (Strike Off, Under Liquidation, ...) the check is
+      downgraded to ``warn`` with a high-severity ``MCA_COMPANY_NOT_ACTIVE`` flag.
+    * **Name matched fuzzily only** -> ``warn`` with a low-severity
+      ``MCA_NAME_ONLY_MATCH`` flag: a name is not unique, so the user must confirm
+      the CIN before trusting it.
+    * **No confident match, or no snapshot available** -> ``not_checked``. A miss
+      is never reported as a failure: the snapshot is a fixed export and may lag,
+      so absence proves nothing.
+
+    ``manufacturer_address`` is accepted for a future disambiguation step and is
+    not used for matching yet.
     """
-    return pending_check(CHECK_COMPANY)
+    check = pending_check(CHECK_COMPANY)
+
+    match = mca.match_company(name=manufacturer_name, cin=cin)
+    if match is None:
+        return check
+
+    if match["matched_on"] == "cin":
+        status = match.get("status")
+        if status and not _is_active_status(status):
+            check["status"] = "warn"
+            check["flags"].append(_mca_not_active_flag(match))
+        else:
+            check["status"] = "pass"
+        return check
+
+    check["status"] = "warn"
+    check["flags"].append(_mca_name_only_flag(match))
+    return check
 
 
 def check_licence(
