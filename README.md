@@ -12,7 +12,7 @@ Score** in seconds.
 | ----- | ----- | -------- |
 | **Read** — label photo → structured fields (OCR) + the **Label-law** check (Legal Metrology, 8 rules) | Sunil Jakhar | `src/` |
 | **Backend API** — `/api/scan`, `/api/verify`, checks, Trust Score, official links, MCA registry | Aditya Raunak | `backend/`, `scripts/`, `sql/` |
-| **Frontend** — the PWA | Yadnyesh Muratkar | separate Next.js app |
+| **Frontend** — the Next.js PWA (Yadnyesh's track) | Yadnyesh Muratkar | [`frontend/`](frontend/README.md) |
 
 The frontend-facing contract is **frozen** in [`API_CONTRACT.md`](API_CONTRACT.md),
 with mock responses in [`samples/`](samples/). Start there.
