@@ -21,14 +21,20 @@ git checkout frontend/yadnyesh
 
 The team repo is <https://github.com/yadnyesh-24/verifyIT>. `frontend/yadnyesh` is
 your branch (the name predates the role swap — keep it so local checkouts keep
-working). The Next.js app now lives in [`frontend/`](frontend/README.md) on `main`,
-so merge `main` in to pick it up:
+working). `frontend/app/` and `frontend/components/` are on `main`, so merge `main`
+in to pick them up:
 
 ```bash
 git checkout frontend/yadnyesh
 git pull --rebase origin frontend/yadnyesh
 git merge origin/main
 ```
+
+**`frontend/lib/` is still uncommitted.** It was invisible because `.gitignore`'s
+Python `lib/` rule matched it at every depth; that is fixed on `main`, so a
+`git merge origin/main` followed by `git add frontend/lib` will commit yours. Until
+then `npm run build` fails on the missing imports (`@/lib/types`, `@/lib/api`,
+`@/lib/i18n`, `@/lib/mocks`, `@/lib/scan-store`, `@/lib/utils`).
 
 Push to that branch (`git pull --rebase origin frontend/yadnyesh` → commit →
 `git push origin frontend/yadnyesh`). `main` is the integration trunk; open a PR

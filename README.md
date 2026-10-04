@@ -70,7 +70,7 @@ VerifyIT/
 ├─ frontend/                    # the Next.js PWA (Sunil's track)
 │  ├─ app/                      # App Router: home → scanning → review → results
 │  ├─ components/               # score gauge, party card, product details, ui primitives
-│  └─ lib/                      # types, i18n (en+hi), api client, mocks, session store
+│  └─ lib/                      # NOT committed yet - see the note below
 ├─ data/
 │  ├─ mca/                      # MCA Company Master Data (git-ignored; CSV template committed)
 │  ├─ test_labels/{real,fake}/  # git-ignored; captured by anyone on the team
@@ -83,9 +83,16 @@ VerifyIT/
 
 > **Not committed yet** — these land with the owners' commits: the `src/*.py`
 > modules (`preprocess`, `ocr`, `fields`, `label_law`, `evaluate`),
-> `docs/label_rules.md`, `data/reference/*`, `data/ground_truth.csv` and the
-> captured photos in `data/test_labels/`. The frontend now lives in `frontend/`
-> and is already in `main`. Everything else shown above is already in `main`.
+> `docs/label_rules.md`, `data/reference/*`, `data/ground_truth.csv`, the captured
+> photos in `data/test_labels/`, and **`frontend/lib/*`** (the frontend's types,
+> API client, i18n dictionary, mocks and session store). The rest of `frontend/` is
+> in `main`. Everything else shown above is already in `main`.
+>
+> `frontend/lib/` was invisible for a while: the Python block in `.gitignore` has a
+> `lib/` rule for build artefacts, git applies it at every depth, and it silently
+> matched `frontend/lib/` too. It is negated now (`!frontend/lib/`) and
+> `tests/test_repo_hygiene.py` fails if that negation is removed — so the files can
+> be committed, but nobody has committed them yet.
 
 ## Implementation status
 
@@ -102,7 +109,7 @@ code is in `main`, covered by tests, and returns real data.
 | OCR (`src/*.py`) | **Not started** — no modules committed yet |
 | Label-law rules (`docs/label_rules.md`) | **Not started** — `label_law` is still a `not_checked` placeholder, but every confirmed field is already forwarded to it |
 | FSSAI / BIS registry lookups (Surepass) | **Not connected** — no credentials exist, so those checks stay `not_checked` and the API returns official portal links instead |
-| Frontend PWA (`frontend/`) | **Builds**; run it against the API, or with mock fixtures for an offline demo |
+| Frontend PWA (`frontend/`) | **Does not build from a fresh clone yet** — the app folder is committed but `frontend/lib/*` is not, and the components import it. Sunil's track; unblocked once those modules are committed (the `.gitignore` rule that hid them is fixed) |
 
 ## Setup
 
