@@ -1,12 +1,74 @@
-# large data, shared outside Git
-data/raw/
-data/exports/
-*.dump
-*.sqlite
-*.csv.gz
-
-# environments and secrets
-.venv/
-node_modules/
-.env
+# ---------- Python ----------
 __pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual envs
+.venv/
+venv/
+env/
+ENV/
+.envrc
+
+# Environment / secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# pytest / coverage
+.pytest_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.cache
+coverage.xml
+
+# IDEs
+.idea/
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+
+# OS
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Project: raw data, models, large artifacts
+data/raw/
+data/processed/
+data/test_labels/real/
+data/test_labels/fake/
+*.pt
+*.h5
+*.pkl
+*.parquet
+*.csv.zip
+
+# Logs
+*.log
+logs/
+
+# Build / dist artifacts
+*.spec
+*.exe
+*.dll
+*.so

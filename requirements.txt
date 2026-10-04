@@ -1,0 +1,27 @@
+# Runtime: see README for the agreed Python version.
+# Core OCR / vision
+numpy
+opencv-python
+pytesseract
+Pillow
+
+# Data + scoring
+pandas
+scikit-learn
+
+# Optional fast JSON I/O for evaluation
+pyarrow
+
+# LLM fallback (Gemini)
+google-generativeai
+
+# Backend glue (used by the FastAPI layer wired up by Aditya)
+fastapi
+uvicorn
+pydantic
+
+# Tests
+pytest
+
+# Dev utilities
+python-dotenv
