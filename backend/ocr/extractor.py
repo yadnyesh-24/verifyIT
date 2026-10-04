@@ -205,6 +205,9 @@ def extract(
             image_bytes=image_bytes,
             api_key=api_key,
             trigger_llm_avg_conf=0.60,
+            # With a key, read every label twice. Without one the call returns
+            # None immediately, so this costs nothing when Gemini isn't set up.
+            force_llm=bool(api_key),
         )
     except Exception as exc:  # pragma: no cover - defensive
         return {

@@ -105,7 +105,9 @@ class ScanResponse(BaseModel):
 
     scan_id: str | None = None
     status: str = providers.STATUS_NOT_CHECKED
-    reason: str = providers.OCR_PENDING_REASON
+    # null once the OCR pipeline actually read fields: there is nothing left to
+    # explain. A reason is only carried when the scan could not produce values.
+    reason: str | None = providers.OCR_PENDING_REASON
     fields: dict[str, ScanField] = Field(default_factory=dict)
 
 

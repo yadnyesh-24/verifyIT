@@ -413,7 +413,7 @@ def gemini_fallback(
     """
     import os
 
-    from backend.ocr.draft_ground_truth import PROMPT, _extract_json
+    from backend.ocr.draft_ground_truth import DEFAULT_MODEL, PROMPT, _extract_json
 
     key = api_key or os.environ.get("GEMINI_API_KEY")
     if not key:
@@ -426,7 +426,7 @@ def gemini_fallback(
 
     try:
         genai.configure(api_key=key)
-        model = genai.GenerativeModel("gemini-2.0-flash")
+        model = genai.GenerativeModel(DEFAULT_MODEL)
         resp = model.generate_content(
             [
                 {"mime_type": "image/jpeg", "data": image_bytes},
@@ -441,7 +441,7 @@ def gemini_fallback(
     out: dict[str, dict[str, Any]] = {}
     product = (parsed or {}).get("product") or {}
     for key_name in (
-        "mrp", "net_quantity", "customer_care", "mfg_date",
+        "product_name", "mrp", "net_quantity", "customer_care", "mfg_date",
         "expiry_or_best_before", "bis_cml", "is_number",
     ):
         val = product.get(key_name)
@@ -451,7 +451,7 @@ def gemini_fallback(
                 "confidence": 0.7,
                 "uncertain": True,
                 "source": "llm",
-                "evidence": {"source": "gemini-2.0-flash"},
+                "evidence": {"source": DEFAULT_MODEL},
             }
     parties = (parsed or {}).get("parties") or []
     if parties:
@@ -483,7 +483,11 @@ def merge_ocr_and_llm(
     """Combine OCR and LLM results.
 
     * Both have a value and they agree -> keep OCR, bump confidence, source="both", uncertain=False.
-    * Same key but disagreement -> keep OCR, mark uncertain, source="ocr".
+    * Disagreement on a field OCR itself flagged ``uncertain`` -> adopt the LLM
+      value. A reader that is unsure of its own guess is the weaker witness, and
+      on a blurred or curved pack it produces values like an MRP of "1.00" that
+      the review screen would otherwise ask the user to correct by hand.
+    * Disagreement on a confident OCR field -> keep OCR, mark uncertain, source="ocr".
     * OCR empty but LLM has a value -> adopt the LLM value (source="llm").
     * LLM-only key -> adopted as-is.
     """
@@ -496,6 +500,9 @@ def merge_ocr_and_llm(
         llm_value = (llm_f.get("value") or "").strip() if llm_f else ""
         if ocr_value and llm_value:
             same = ocr_value == llm_value
+            if not same and ocr_f.get("uncertain"):
+                merged[k] = dict(llm_f)
+                continue
             merged[k] = {
                 "value": ocr_value,
                 "confidence": min(1.0, (ocr_f.get("confidence") or 0.5) + 0.2),
@@ -533,15 +540,20 @@ def extract(
     image_bytes: bytes | None = None,
     api_key: str | None = None,
     trigger_llm_avg_conf: float = 0.60,
+    force_llm: bool = False,
     fields: Iterable[str] = DEFAULT_FIELDS,
 ) -> dict[str, dict[str, Any]]:
     """Extract every field in ``fields`` from OCR lines.
 
     * Format-only fields use FORMAT_EXTRACTORS directly.
     * Anchor fields use find_candidates + pick_best.
-    * If average OCR confidence is below ``trigger_llm_avg_conf`` AND
-      ``image_bytes`` is provided, the Gemini Vision fallback runs and the
-      results are merged via :func:`merge_ocr_and_llm`.
+    * If average OCR confidence is below ``trigger_llm_avg_conf`` - or
+      ``force_llm`` is set - AND ``image_bytes`` is provided, the Gemini Vision
+      fallback runs and the results are merged via :func:`merge_ocr_and_llm`.
+
+    The average confidence is a poor gate on its own: a photo can read cleanly
+    enough to clear 0.60 while still mangling the individual fields, so a caller
+    that has a key can ask for the Vision pass every time.
     """
     avg_conf = sum(line.conf for line in lines) / max(len(lines), 1)
     out: dict[str, dict[str, Any]] = {f: empty_field() for f in fields}
@@ -573,7 +585,7 @@ def extract(
             "evidence": {"line_index": best.line_index, "raw": best.raw},
         }
 
-    if image_bytes is not None and avg_conf < trigger_llm_avg_conf:
+    if image_bytes is not None and (force_llm or avg_conf < trigger_llm_avg_conf):
         llm = gemini_fallback(image_bytes, api_key=api_key)
         if llm:
             out = merge_ocr_and_llm(out, llm)

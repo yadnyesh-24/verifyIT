@@ -217,6 +217,29 @@ def test_merge_ocr_and_llm_disagreement_marks_uncertain():
     assert merged["mrp"]["uncertain"] is True
 
 
+def test_merge_ocr_and_llm_disagreement_prefers_llm_when_ocr_is_unsure():
+    """OCR that doubts its own reading loses the tie-break.
+
+    A blurred pack yields values like an MRP of "1.00" flagged uncertain; the
+    Vision model's reading is the better answer to put in front of the user.
+    """
+    ocr_f = {"mrp": {"value": "1.00", "confidence": 0.3, "uncertain": True, "source": "ocr"}}
+    llm_f = {"mrp": {"value": "349.00", "confidence": 0.7, "uncertain": True, "source": "llm"}}
+    merged = fields.merge_ocr_and_llm(ocr_f, llm_f)
+    assert merged["mrp"]["value"] == "349.00"
+    assert merged["mrp"]["source"] == "llm"
+
+
+def test_extract_force_llm_runs_even_on_confident_lines(monkeypatch):
+    """A clean read of the wrong text still clears the average-confidence gate."""
+    monkeypatch.setattr(fields, "gemini_fallback", lambda *_a, **_kw: {
+        "cin": {"value": "U15100MH2009PTC123456", "confidence": 0.7, "uncertain": True, "source": "llm"}
+    })
+    lines = [_line("FSSAI 10012022000123", conf=0.95) for _ in range(10)]
+    out = fields.extract(lines, image_bytes=b"fake-bytes", force_llm=True)
+    assert out["cin"]["value"] == "U15100MH2009PTC123456"
+
+
 def test_merge_ocr_and_llm_adds_llm_only():
     ocr_f = {"mrp": {"value": "40.00", "confidence": 0.6, "uncertain": False, "source": "ocr"}}
     llm_f = {"cin": {"value": "U15100MH2009PTC123456", "confidence": 0.7, "uncertain": True, "source": "llm"}}

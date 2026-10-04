@@ -78,6 +78,7 @@ If a field is not printed, return null. Return JSON only, no prose.
 Schema:
 {
   "product": {
+    "product_name": string|null,
     "mrp": string|null,
     "net_quantity": string|null,
     "customer_care": string|string[]|null,
@@ -100,7 +101,8 @@ Schema:
   ]
 }"""
 
-DEFAULT_MODEL = "gemini-2.0-flash"
+#: Overridable so a retired model never needs a code change to replace.
+DEFAULT_MODEL = os.environ.get("GEMINI_MODEL", "gemini-3.8-flash")
 
 
 # --------------------------------------------------------------------------- #

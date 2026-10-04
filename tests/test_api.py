@@ -91,6 +91,42 @@ def test_scan_with_image_returns_no_guessed_fields() -> None:
         assert f["value"] is None
 
 
+def test_scan_that_read_fields_returns_a_null_reason(monkeypatch: pytest.MonkeyPatch) -> None:
+    """The success shape from API_CONTRACT.md must survive the response model.
+
+    A scan that actually read something carries ``reason: null`` — there is
+    nothing to explain. ``ScanResponse.reason`` used to be a bare ``str``, so
+    this shape raised a ValidationError and the browser saw a 500 instead of
+    the fields. Only the no-fields path (reason: a string) was covered before.
+    """
+    monkeypatch.setattr(
+        providers,
+        "build_scan",
+        lambda **kwargs: {
+            "scan_id": "scan_abc",
+            "status": "checked",
+            "reason": None,
+            "fields": {
+                "manufacturer": {
+                    "value": "Acme Foods Pvt Ltd",
+                    "confidence": 0.92,
+                    "uncertain": False,
+                    "source": "ocr",
+                }
+            },
+        },
+    )
+    resp = client.post(
+        "/api/scan",
+        files={"file": ("label.jpg", b"\xff\xd8\xff\xe0jpeg-ish", "image/jpeg")},
+    )
+    assert resp.status_code == 200
+    body = resp.json()
+    assert body["reason"] is None
+    assert body["status"] == "checked"
+    assert body["fields"]["manufacturer"]["value"] == "Acme Foods Pvt Ltd"
+
+
 def test_verify_echoes_the_scan_id_from_the_scan() -> None:
     """The id minted by /api/scan survives the review round trip unchanged."""
     scan_id = client.post("/api/scan").json()["scan_id"]

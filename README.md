@@ -105,13 +105,20 @@ code is in `main`, covered by tests, and returns real data.
 | `POST /api/verify` — 3 checks, derived Trust Score, verdict, official links | **Working** |
 | `company` check vs the local MCA snapshot (1.99M rows, `pg_trgm`) | **Working** — needs an imported snapshot; without one it stays `not_checked` |
 | FSSAI **format** check (14 ASCII digits) | **Working** — a valid format is *not* a verified licence |
-| `POST /api/scan` | **Partial** — returns a real `scan_id` and an honest empty `fields` map; the OCR pipeline is not connected |
-| OCR (`src/*.py`) | **Not started** — no modules committed yet |
+| `POST /api/scan` | **Working** — a photo runs the real pipeline and returns the 13 fields; with no file it still returns the honest `scan_id` + empty `fields` placeholder |
+| OCR (`backend/ocr/*.py`) | **Working** — preprocess → Tesseract (PSM 6 vs 11) → field extraction, needs the Tesseract binary |
+| Gemini Vision fallback | **Working** — runs on every scan when `GEMINI_API_KEY` is set and overrides OCR values the reader flagged uncertain; silently skipped without a key |
 | Label-law rules (`docs/label_rules.md`) | **Not started** — `label_law` is still a `not_checked` placeholder, but every confirmed field is already forwarded to it |
 | FSSAI / BIS registry lookups (Surepass) | **Not connected** — no credentials exist, so those checks stay `not_checked` and the API returns official portal links instead |
 | Frontend PWA (`frontend/`) | **Builds and runs** — `frontend/lib/*` is committed, the UI is wired to the real API through Next rewrites, and `npm run smoke` checks every response against the contract |
 
 ## Setup
+
+Four steps, in order: Python deps, the Tesseract binary, **your own Gemini API
+key**, then the Node deps. A scan needs all four — Tesseract reads the text off
+the photo and Gemini re-reads the same photo to correct it.
+
+### 1. Python
 
 ```bash
 # from the repo root
@@ -120,16 +127,70 @@ source .venv/bin/activate           # Windows: .venv\Scripts\activate
 python -m pip install --upgrade pip
 pip install -r requirements.txt     # runtime: backend API + OCR / vision stack
 pip install -r requirements-dev.txt # tests / tooling
-cp .env.example .env                # then fill in GEMINI_API_KEY etc.
 ```
 
-Tesseract (with `eng` + `hin`) is only needed for the OCR track:
+### 2. Tesseract (`eng` + `hin`)
+
+The OCR pass shells out to the Tesseract binary, which is **not** a Python
+package — install it separately.
+
+```bash
+winget install UB-Mannheim.TesseractOCR   # Windows
+brew install tesseract tesseract-lang     # macOS
+sudo apt install tesseract-ocr tesseract-ocr-hin   # Debian / Ubuntu
+```
 
 ```bash
 tesseract --list-langs   # must show: eng, hin
 ```
 
-## Running the whole app (one command)
+The Windows installer ships `eng` and `osd` only. If `hin` is missing, download
+[`hin.traineddata`](https://github.com/tesseract-ocr/tessdata/raw/main/hin.traineddata)
+into `C:\Program Files\Tesseract-OCR\tessdata\` (an admin prompt — that folder is
+write-protected) and run `--list-langs` again.
+
+### 3. Your own Gemini API key
+
+```bash
+cp .env.example .env
+```
+
+Open `.env` and put **your own** key in `GEMINI_API_KEY`. No key ships with this
+repo and none is shared — get a free one at
+[aistudio.google.com/apikey](https://aistudio.google.com/apikey) (sign in, *Create
+API key*, copy it).
+
+```ini
+GEMINI_API_KEY=your-key-here
+```
+
+Paste the key with **no spaces and no quotes** around it. A stray leading space
+is the single most common failure here, and it is invisible in an editor: the
+Vision call then fails authentication, the fallback swallows the error by design,
+and every field silently falls back to raw OCR — which looks like bad accuracy
+rather than a bad key.
+
+`.env` is git-ignored, so your key stays on your machine. The variables that
+matter for a scan:
+
+| Variable | Default | What it does |
+| -------- | ------- | ------------ |
+| `GEMINI_API_KEY` | *(none)* | Without it the Vision pass is skipped entirely and you get raw OCR values. The app still runs. |
+| `GEMINI_MODEL` | `gemini-3.8-flash` | Override when Google retires the default. A retired model returns 404 and is swallowed like any other failure. |
+| `TESSERACT_CMD` | `C:\Program Files\Tesseract-OCR\tesseract.exe` | Only needed when the binary is not on `PATH`. |
+
+To confirm the key works before scanning anything:
+
+```bash
+python -c "from dotenv import load_dotenv; load_dotenv(); import os, google.generativeai as genai; genai.configure(api_key=os.environ['GEMINI_API_KEY']); print(genai.GenerativeModel(os.environ.get('GEMINI_MODEL','gemini-3.8-flash')).generate_content('Say OK').text)"
+```
+
+A printed `OK` means you are set. **Restart the API after editing `.env`** —
+`load_dotenv` never overwrites a variable the running process already has, so a
+corrected key is ignored until a full restart (uvicorn's auto-reload is not
+enough).
+
+## 4. Running the whole app (one command)
 
 ```bash
 npm install                 # once, at the repo root (installs concurrently)
@@ -154,6 +215,24 @@ needs a CORS preflight.
 | `NEXT_PUBLIC_DATA_MODE` | `auto` | `auto` uses the API when `/api/health/db` answers and bundled fixtures otherwise; `live` and `mock` force one or the other. |
 | `API_PORT` | `8000` | Port for uvicorn. |
 | `API_RELOAD` | `1` | `0` drops uvicorn's watcher process - useful on a low-memory machine. |
+
+### Scanning your first label
+
+Open <http://localhost:3000>, photograph (or upload) any packaged product label
+and let it run. A scan takes roughly **25–30 seconds**: the photo is
+preprocessed, read by Tesseract, then read again by Gemini Vision, and the two
+readings are merged. That second pass is why the wait is worth it — on a curved
+or blurred pack, raw OCR routinely returns an MRP of `1.00` where the Vision
+model reads `349.00`.
+
+Nothing is auto-submitted. The review screen shows every field with its source
+(`OCR`, `LLM` or `both`) and flags the uncertain ones with **Please check**, so
+you confirm or correct the values before anything is verified. A field the pack
+does not print should be left blank rather than guessed.
+
+Without a `GEMINI_API_KEY` the app still scans — it just shows the raw OCR
+values, which on a real-world photo are often wrong enough to need hand
+correction on most fields.
 
 ### Smoke test
 
