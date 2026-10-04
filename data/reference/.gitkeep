@@ -1,0 +1,2 @@
+# Reference datasets (e.g. FSSAI state-code table).
+# Small CSVs may be committed here; large raw files belong in data/raw/ (ignored).
