@@ -1,0 +1,24 @@
+{
+  "scan_id": "scan_0123456789abcdef0123456789abcdef",
+  "checks": [
+    {
+      "id": "company",
+      "status": "not_checked",
+      "flags": []
+    },
+    {
+      "id": "licence",
+      "status": "not_checked",
+      "flags": []
+    },
+    {
+      "id": "label_law",
+      "status": "not_checked",
+      "flags": []
+    }
+  ],
+  "score": null,
+  "checks_ran": 0,
+  "verdict": "not_checked",
+  "official_links": []
+}

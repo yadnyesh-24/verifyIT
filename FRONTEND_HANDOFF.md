@@ -1,4 +1,4 @@
-# Frontend handoff — for Yadnyesh
+# Frontend handoff — for Sunil
 
 Everything you need to build the UI **without waiting on the backend**. The
 backend already returns the exact contract below. Most checks are honest
@@ -19,9 +19,18 @@ cd verifyIT
 git checkout frontend/yadnyesh
 ```
 
-The team repo is <https://github.com/yadnyesh-24/verifyIT>. `frontend/yadnyesh`
-is your branch — keep the Next.js app in its own folder (e.g. `web/`) and push to
-that branch (`git pull --rebase origin frontend/yadnyesh` → commit →
+The team repo is <https://github.com/yadnyesh-24/verifyIT>. `frontend/yadnyesh` is
+your branch (the name predates the role swap — keep it so local checkouts keep
+working). The Next.js app now lives in [`frontend/`](frontend/README.md) on `main`,
+so merge `main` in to pick it up:
+
+```bash
+git checkout frontend/yadnyesh
+git pull --rebase origin frontend/yadnyesh
+git merge origin/main
+```
+
+Push to that branch (`git pull --rebase origin frontend/yadnyesh` → commit →
 `git push origin frontend/yadnyesh`). `main` is the integration trunk; open a PR
 into it when a chunk is demo-ready. **The backend in this repo and
 `API_CONTRACT.md` are frozen** — read them, don't change them.
@@ -57,8 +66,14 @@ mfg_date, expiry, customer_care, cin, gstin, product_name
 ### `POST /api/scan`
 
 ```json
-{ "scan_id": null, "status": "not_checked", "reason": "OCR pipeline not connected", "fields": {} }
+{ "scan_id": "scan_9f2c…", "status": "not_checked", "reason": "OCR pipeline not connected", "fields": {} }
 ```
+
+`scan_id` is minted fresh on every scan —
+[`samples/scan_response.json`](samples/scan_response.json) documents the shape with
+a `<generated>` placeholder because the value changes per call. Send it back with
+the confirmed fields in step 3 and the API echoes it unchanged, which is how you tie
+a result to the scan it came from. It is `null` only when you never scanned.
 
 Per field (once OCR is wired): `{ "value": "…", "confidence": 0.0-1.0,
 "uncertain": true|false, "source": "ocr" | "llm" | "both" }`.
@@ -107,6 +122,41 @@ always pair it with `checks_ran`:
 `"Trust score 100 — based on 1 of 3 checks"` is honest. A bare `100` is not. The
 full formula is in
 [`API_CONTRACT.md`](API_CONTRACT.md#the-trust-score).
+
+**Colour and wording come from `verdict`, never from a threshold in the client.**
+The backend applies the score bands *and* the worst flag severity, so a
+re-implemented threshold disagrees with the API — the old gauge used 75/45 while the
+contract uses 75/40, and a high-severity flag can return `high_risk` at a score of
+60.
+
+```jsx
+const VERDICT_STYLE = {
+  low_risk:    { color: "text-success",     label: "Low risk in completed checks" },
+  medium_risk: { color: "text-warning",     label: "Check carefully" },
+  high_risk:   { color: "text-destructive", label: "High risk found" },
+} as const;
+```
+
+Always say what the number does **not** mean: it covers the checks that ran, so it
+is not proof that the product is authentic or safe.
+
+### Sending the confirmed fields back
+
+`/api/verify` forwards **every** field in the request to the label-law checker,
+including the ones the user left blank — "the label does not print an MRP" is a
+violation while "the form was not filled in" is not, and the rules have to tell
+those apart. So send the full body every time, with `null` for anything genuinely
+absent:
+
+```jsonc
+{
+  "scan_id": "scan_9f2c…",
+  "manufacturer": "…", "address": "…", "pincode": "…",
+  "fssai": "…", "bis_licence": "…", "cin": "…", "gstin": "…",
+  "mrp": "…", "net_qty": "…", "mfg_date": "…", "expiry": "…",
+  "customer_care": "…", "product_name": "…"
+}
+```
 
 ### What you can already demo
 

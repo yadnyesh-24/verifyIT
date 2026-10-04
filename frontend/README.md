@@ -28,10 +28,21 @@ triggered deterministically.
 
 ## Demo mock fixtures
 
-- `?mock=genuine` - single party, all checks `pass`, score 92.
-- `?mock=multi` - marketer + 2 manufacturer units, `MCA_NAME_ONLY_MATCH` and a
-  `STATE_MISMATCH` flag.
-- `?mock=fake` - company not found, FSSAI wrong length, score 32.
+The fixtures only use states the backend can actually return today, and their
+`score` / `checks_ran` / `verdict` follow the real formula, so a demo can never show
+a number the API would not produce (see the honesty rules at the top of
+`lib/mocks.ts`).
+
+| `?mock=` | What it shows | `score` | `checks_ran` | `verdict` |
+| -------- | ------------- | ------- | ------------ | --------- |
+| `genuine` | one manufacturer, CIN found and Active | 100 | 1 | `low_risk` |
+| `multi` | marketer + 2 units, `MCA_NAME_ONLY_MATCH` (low) + `FSSAI_FORMAT_INVALID` | 66 | 2 | `medium_risk` |
+| `fake` | CIN matched to a `Strike Off` company + `FSSAI_FORMAT_INVALID` | 23 | 2 | `high_risk` |
+
+No fixture shows `licence: "pass"`: the FSSAI/BIS registries are not connected, so
+that state cannot occur and a green licence badge would misrepresent the system. The
+OCR'd fields are illustrative too — the real `/api/scan` returns `fields: {}` until
+the OCR pipeline lands.
 
 ## Layout
 
@@ -51,21 +62,35 @@ frontend/
 │  ├─ product-details-card.tsx# Editable product fields
 │  └─ error-boundary.tsx      # Top-level React error boundary
 └─ lib/
-   ├─ types.ts                # ScanResponse / VerifyResponse / etc.
-   ├─ i18n.ts                 # Single en+hi dictionary, t(lang, key)
+   ├─ types.ts                # ScanResponse / VerifyResponse / Verdict / etc.
+   ├─ i18n.ts                 # Single en+hi dictionary, t(lang, key[, params])
    ├─ mocks.ts                # Demo fixtures + mock-mode detection
-   ├─ compress-image.ts       # 1600-px canvas resize before upload
-   ├─ api.ts                  # scanLabel / verifyItem / health
-   └─ scan-store.tsx          # Context store, localStorage persistence
+   ├─ api.ts                  # scanLabel / verifyItem / health / toVerifyBody
+   ├─ scan-store.tsx          # Context store (language persisted to localStorage)
+   └─ utils.ts                # cn()
 ```
+
+> `lib/` was reconstructed from how the app consumes it — the original modules were
+> never committed. In particular **`compress-image.ts` does not exist**, so
+> `scanLabel()` uploads the picked file as-is; add the resize step here before the
+> OCR pipeline ships. Keep `toVerifyBody()` in step with
+> `backend.main.LABEL_FIELD_NAMES` whenever the contract grows.
 
 ## API contract
 
 The frontend talks to two endpoints. The shapes live in `lib/types.ts`:
 
 - `POST /api/scan` (multipart `file`) - returns the OCR'd fields.
-- `POST /api/verify` (JSON body of fields) - returns checks, score, verdict,
-  and the official portal buttons.
+- `POST /api/verify` (JSON body of fields) - returns checks, score, `checks_ran`,
+  verdict, and the official portal buttons.
+
+Two rules the UI must follow, because re-deriving either in the client disagrees
+with the API:
+
+- The gauge takes its colour and wording from `verdict` — never from a local score
+  threshold (`API_CONTRACT.md` -> "The trust score" explains why the two differ).
+- Always print the coverage next to the number: `"Based on X of 3 checks"`. A bare
+  score reads as a whole-label verdict, which it is not unless all three checks ran.
 
 See [`../API_CONTRACT.md`](../API_CONTRACT.md) for the full contract.
 

@@ -2,11 +2,16 @@
 
 FastAPI application for the "Verify It" hackathon project.
 
-Registry providers (company/CIN, FSSAI, BIS), Surepass and the OCR pipeline are
-not connected yet: real registry data and credentials are unavailable, and no
-external registry API is called. Every check therefore returns a neutral
-``not_checked`` placeholder (see ``backend.providers``) so the response contract
-stays stable for the frontend while providers are integrated later.
+What can actually run today: the ``company`` check against a locally imported MCA
+*Company Master Data* snapshot, and the deterministic FSSAI *format* check. The
+FSSAI/BIS registries (Surepass), and the OCR pipeline are not connected - no
+external registry API is called and no credentials exist for one - so those
+checks return a neutral ``not_checked`` placeholder (see ``backend.providers``)
+and the response contract stays stable for the frontend.
+
+Nothing is invented anywhere: a check that cannot run is ``not_checked``, the
+trust score is derived only from the checks that did run (and is ``null`` when
+none did), and every claim carries the evidence behind it.
 """
 
 from typing import Any
@@ -35,6 +40,25 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+
+#: Confirmed label fields forwarded to the label-law checker, in the order the
+#: review screen collects them. ``scan_id`` is deliberately absent: it identifies
+#: the *scan session*, not the label, so it is never a check input.
+LABEL_FIELD_NAMES = (
+    "manufacturer",
+    "address",
+    "pincode",
+    "fssai",
+    "bis_licence",
+    "mrp",
+    "net_qty",
+    "mfg_date",
+    "expiry",
+    "customer_care",
+    "cin",
+    "gstin",
+    "product_name",
+)
 
 app = FastAPI(title=APP_NAME)
 
@@ -157,11 +181,12 @@ def health() -> dict[str, str]:
 
 @app.post("/api/scan", response_model=ScanResponse)
 async def scan(file: UploadFile | None = File(default=None)) -> ScanResponse:
-    """Read a label photo and return the extracted fields.
+    """Read a label photo and return the extracted fields for one scan session.
 
     Placeholder: the OCR pipeline is owned by another workstream and is not
-    connected yet, so no fields are returned (and none are guessed). The uploaded
-    file is accepted and intentionally not stored.
+    connected yet, so no fields are returned (and none are guessed). A ``scan_id``
+    is minted here so the review screen can send it back with ``/api/verify``. The
+    uploaded file is accepted and intentionally not stored.
     """
     return ScanResponse(**providers.build_scan())
 
@@ -170,16 +195,25 @@ async def scan(file: UploadFile | None = File(default=None)) -> ScanResponse:
 def verify(payload: VerifyRequest | None = None) -> VerifyResponse:
     """Run the three checks over the supplied (confirmed) field values.
 
-    The body is optional and every field inside it is optional. Until the
-    providers are connected each check is ``not_checked``; the only
-    deterministic signal today is the FSSAI *format* check.
+    The body is optional and every field inside it is optional.
+
+    Every confirmed label field is forwarded to the label-law checker, including
+    the ones left empty, because "the label does not print this" is a different -
+    and checkable - fact from "the user did not fill it in". ``scan_id`` is echoed
+    back unchanged so the review screen can correlate the scan and the verify.
+
+    The deterministic signals today are the FSSAI *format* check and the ``company``
+    check when an MCA snapshot has been imported.
     """
     payload = payload or VerifyRequest()
+    fields = {name: getattr(payload, name) for name in LABEL_FIELD_NAMES}
     result = providers.build_verification(
+        scan_id=payload.scan_id,
         manufacturer_name=payload.manufacturer,
         manufacturer_address=payload.address,
         cin=payload.cin,
         fssai_number=payload.fssai,
         bis_number=payload.bis_licence,
+        fields=fields,
     )
     return VerifyResponse(**result)

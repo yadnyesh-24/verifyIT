@@ -19,19 +19,27 @@ These rules apply to every Cline task in this repository. Keep them in sync with
   - `scripts/import_mca.py` - importer for the local registry snapshot.
   - `tests/` - pytest tests; `samples/` - frozen frontend mock responses.
   - `data/` - local registry exports (git-ignored, never committed).
-  - `src/` - Sunil's *Read* (OCR) + *Label-law* track; `docs/label_rules.md`
+  - `src/` - Yadnyesh's *Read* (OCR) + *Label-law* track; `docs/label_rules.md`
     holds the Legal Metrology rules it implements.
+  - `frontend/` - the Next.js PWA (Sunil). It builds from the frozen contract and
+    `samples/`, and must never re-derive the verdict or the score in the client.
 
 ## Repository & branches
 - Team GitHub repo (this is `origin`): <https://github.com/yadnyesh-24/verifyIT>.
-- Branches: `main` (integration trunk, Aditya), `frontend/yadnyesh` (Yadnyesh),
-  `ocr/sunil` (Sunil). Teammates work on their own branch and PR into `main`.
+- Branches: `main` (integration trunk, Aditya), `frontend/yadnyesh` (the PWA,
+  worked by Sunil) and `ocr/sunil` (the Read + Label-law track, worked by
+  Yadnyesh). The branch names predate the role swap - keep them so nobody's local
+  checkout breaks. Teammates work on their own branch and PR into `main`.
 - Start: `git clone https://github.com/yadnyesh-24/verifyIT.git && cd verifyIT`
   then `git checkout <your-branch>`.
 - Sync before you commit: `git pull --rebase origin <your-branch>`, then
   `git push origin <your-branch>`.
-- Sunil edits only `build_scan()` + `check_label_law()` in `backend/providers.py`.
-  Yadnyesh does not edit this repo's backend at all - the contract is frozen.
+- Yadnyesh (Read + Label-law) edits only `build_scan()` + `check_label_law()` in
+  `backend/providers.py`. Sunil (frontend) does not edit this repo's backend at
+  all - the contract is frozen.
+- Nobody edits the routes or schemas in `backend/main.py` without updating
+  `API_CONTRACT.md`, `FRONTEND_HANDOFF.md`, `samples/` and the tests in the same
+  change.
 
 ## API contract (frozen - change only with docs + tests + samples)
 - `GET /api/health` -> `{"status":"ok","app":"Verify It"}`.
@@ -41,12 +49,27 @@ These rules apply to every Cline task in this repository. Keep them in sync with
 - `checks` is always exactly three, in order: `company`, `licence`, `label_law`.
 - A check status is one of `pass`, `warn`, `fail`, `not_checked`.
 - A flag is `{code, severity, en, hi, evidence}`; `severity` is `high|medium|low`.
-  Known codes: `FSSAI_FORMAT_INVALID` (licence), `MCA_COMPANY_NOT_ACTIVE` and
-  `MCA_NAME_ONLY_MATCH` (company). `evidence` must stay JSON-serialisable.
-- The `company` check: exact `cin` hit with an Active status -> `pass`; a non-Active
-  status or a fuzzy name-only hit -> `warn`; anything else -> `not_checked`. It
-  never returns `fail`.
+  Known codes: `FSSAI_FORMAT_INVALID` (licence); `MCA_COMPANY_NOT_ACTIVE`,
+  `MCA_COMPANY_STATUS_UNKNOWN`, `MCA_NAME_ONLY_MATCH` and
+  `MCA_NAME_ONLY_MATCH_NOT_ACTIVE` (company). `evidence` must stay
+  JSON-serialisable, and every MCA flag must record `matched_on` (`"cin"` or
+  `"name"`) plus the `status` it saw.
+- The `company` check: an exact `cin` hit with an Active status -> `pass`. A CIN
+  hit with a non-Active status, or with **no recorded status at all**, -> `warn`
+  (`MCA_COMPANY_NOT_ACTIVE` / `MCA_COMPANY_STATUS_UNKNOWN`) - a CIN proves the
+  register *contains* the company, never that it is still live. A fuzzy name-only
+  hit -> `warn` and **never** `pass`: `MCA_NAME_ONLY_MATCH` (low) when the matched
+  record is Active, `MCA_NAME_ONLY_MATCH_NOT_ACTIVE` (medium) when it is not.
+  Anything else -> `not_checked`. It never returns `fail`.
 - `official_links[]` is `{label, url, copy}` (copy the number, open the portal).
+- `POST /api/scan` mints a fresh `scan_id` (`scan_<uuid4hex>`). It is a session
+  handle, not registry data: nothing is persisted and nothing is inferred from it.
+  `/api/verify` echoes a received `scan_id` back unchanged, or `null` when the
+  caller never scanned. `scan_id` is never a check input
+  (`backend.main.LABEL_FIELD_NAMES` lists what is).
+- `/api/verify` forwards **every** confirmed label field to `check_label_law()`,
+  including the ones left blank (`None`), because "the label does not print an
+  MRP" is a checkable fact, while "the form was not filled in" is a different one.
 
 ## Non-negotiable correctness rules
 - **Never invent registry data.** Anything the API reports must come from a real
@@ -98,8 +121,13 @@ These rules apply to every Cline task in this repository. Keep them in sync with
 - Tests live in `tests/` and run with `./.venv/bin/python -m pytest`. The suite
   must pass with **no database running** - database-dependent tests skip
   themselves - so keep pure logic pure and put anything DB-bound behind the skip.
+- Distinguish **mocked** checks from **real** ones. A test that stubs the matcher,
+  the database or a checker proves the wiring only; say so in the test's docstring
+  (see the "MOCKED" heading in `tests/test_api.py`) so nobody reads it as evidence
+  about real registry data.
 - Add/extend tests with every behaviour change. Cover: scan with/without file,
   verify empty/no/partial body, valid + invalid FSSAI formats (incl. Unicode
   digits), CORS, official links, the "no invented fields" invariant, MCA name
-  normalisation and matching, the importer's header/date handling, and the
-  `check_company` status mapping (including "never `fail`").
+  normalisation and matching, the importer's header/date handling, the forwarded
+  field set and the `scan_id` round trip, and the `check_company` status mapping
+  (including "never `fail`" and "a missing status is not a pass").

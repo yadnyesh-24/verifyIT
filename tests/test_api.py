@@ -7,6 +7,7 @@ exercised end to end. No network access is required.
 import pytest
 from fastapi.testclient import TestClient
 
+from backend import main, providers
 from backend.main import app
 
 client = TestClient(app)
@@ -30,7 +31,8 @@ def test_scan_without_file_returns_placeholder() -> None:
     assert resp.status_code == 200
     data = resp.json()
     assert set(data) == {"scan_id", "status", "reason", "fields"}
-    assert data["scan_id"] is None
+    assert isinstance(data["scan_id"], str)  # a real session id, not a hardcoded null
+    assert data["scan_id"].startswith(providers.SCAN_ID_PREFIX)
     assert data["status"] == "not_checked"
     assert data["reason"] == "OCR pipeline not connected"
     assert data["fields"] == {}
@@ -43,6 +45,22 @@ def test_scan_with_image_returns_no_guessed_fields() -> None:
     )
     assert resp.status_code == 200
     assert resp.json()["fields"] == {}
+
+
+def test_verify_echoes_the_scan_id_from_the_scan() -> None:
+    """The id minted by /api/scan survives the review round trip unchanged."""
+    scan_id = client.post("/api/scan").json()["scan_id"]
+    data = client.post("/api/verify", json={"scan_id": scan_id}).json()
+    assert data["scan_id"] == scan_id
+    # Echoing the id must not change any check: it is never a check input.
+    assert all(c["status"] == "not_checked" for c in data["checks"])
+    assert data["score"] is None
+    assert data["checks_ran"] == 0
+
+
+def test_verify_without_a_scan_id_stays_null() -> None:
+    """A caller that never scanned (curl, tests) gets no invented id."""
+    assert client.post("/api/verify", json={}).json()["scan_id"] is None
 
 
 # --- POST /api/verify -------------------------------------------------------
@@ -133,6 +151,80 @@ def test_verify_response_has_no_invented_fields() -> None:
     assert "licence_valid" not in body
     assert "trust_score" not in body
     assert "\"pass\"" not in body  # nothing is asserted as passing without a registry
+
+
+# --- Field forwarding (MOCKED: the label-law checker is stubbed) ---------------
+#
+# ``check_label_law`` is still a placeholder that returns ``not_checked`` whatever
+# it is handed, so these tests assert the *wiring* only - which fields reach it -
+# by replacing the checker and capturing its arguments. They say nothing about
+# label-law rule behaviour, because there is no rule engine yet.
+
+#: Every field the contract promises to forward, with a confirmed value.
+FORWARDED_FIELDS = {
+    "manufacturer": "Example Foods Pvt Ltd",
+    "address": "12 Example Road, Mumbai",
+    "pincode": "400001",
+    "fssai": "10012022000123",
+    "bis_licence": "CM/L-1234567890",
+    "mrp": "50.00",
+    "net_qty": "70 g",
+    "mfg_date": "2026-01-01",
+    "expiry": "2027-01-01",
+    "customer_care": "1800-000-0000",
+    "cin": "U15100MH2009PTC123456",
+    "gstin": "27AAACR5055K1Z5",
+    "product_name": "Example Namkeen",
+}
+
+
+def _capture_fields(monkeypatch: pytest.MonkeyPatch) -> dict:
+    """Stub ``check_label_law`` and return the dict of fields it was handed."""
+    captured: dict = {}
+
+    def _stub(*, fields: dict | None = None) -> dict:
+        captured.update(fields or {})
+        return {"id": "label_law", "status": "not_checked", "flags": []}
+
+    monkeypatch.setattr(providers, "check_label_law", _stub)
+    return captured
+
+
+def test_verify_forwards_every_confirmed_field(monkeypatch: pytest.MonkeyPatch) -> None:
+    """MRP, net quantity, dates, address and pincode all reach the checker."""
+    captured = _capture_fields(monkeypatch)
+    resp = client.post("/api/verify", json={**FORWARDED_FIELDS, "scan_id": "scan_abc"})
+    assert resp.status_code == 200
+    assert captured == FORWARDED_FIELDS  # every key, exactly the confirmed values
+    assert "scan_id" not in captured  # a session id is not a label field
+
+
+def test_verify_forwards_blank_fields_as_none(monkeypatch: pytest.MonkeyPatch) -> None:
+    """A field the user left blank still arrives - as ``None``.
+
+    "The label does not print an MRP" is a Legal Metrology violation, so the rule
+    engine has to be able to tell it apart from "the form was never filled in".
+    """
+    captured = _capture_fields(monkeypatch)
+    client.post("/api/verify", json={"mrp": "50.00"})
+    assert set(captured) == set(main.LABEL_FIELD_NAMES)
+    assert captured["mrp"] == "50.00"
+    assert captured["net_qty"] is None
+
+
+def test_verify_forwards_blank_fields_when_the_body_is_empty(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    captured = _capture_fields(monkeypatch)
+    client.post("/api/verify", json={})
+    assert set(captured) == set(main.LABEL_FIELD_NAMES)
+    assert all(value is None for value in captured.values())
+
+
+def test_label_field_names_excludes_scan_id() -> None:
+    """Guard the list itself: a session id must never look like a label field."""
+    assert "scan_id" not in main.LABEL_FIELD_NAMES
+    assert set(main.LABEL_FIELD_NAMES) == set(FORWARDED_FIELDS)
 
 
 # --- CORS -------------------------------------------------------------------

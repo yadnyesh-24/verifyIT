@@ -143,8 +143,21 @@ snapshot, or without a confident match, it stays `"not_checked"`.
 | --------- | -------- | ----- |
 | `cin` is in the register and the recorded status is Active | `"pass"` | none |
 | `cin` is in the register but the status is not Active (e.g. `Strike Off`) | `"warn"` | `MCA_COMPANY_NOT_ACTIVE` (high) |
-| only the `manufacturer` name matched, fuzzily (similarity >= 0.62) | `"warn"` | `MCA_NAME_ONLY_MATCH` (low) |
+| `cin` is in the register but **no status is recorded** for it | `"warn"` | `MCA_COMPANY_STATUS_UNKNOWN` (medium) |
+| only the `manufacturer` name matched, fuzzily (similarity >= 0.62), and that record is Active | `"warn"` | `MCA_NAME_ONLY_MATCH` (low) |
+| a name matched, and that record is not Active (or has no recorded status) | `"warn"` | `MCA_NAME_ONLY_MATCH_NOT_ACTIVE` (medium) |
 | no match, no snapshot, or a company the snapshot does not contain | `"not_checked"` | none - a miss is **never** a failure |
+
+Two rules make the table easier to read:
+
+- **A `pass` requires an Active status.** A CIN only proves the register *contains*
+  the company; it never proves the company is still live, and it is worth nothing
+  when the export records no status at all.
+- **A name match can never pass**, whatever the matched record's status says - a
+  name is not a unique identifier.
+
+Both rules exist because of the same failure mode: a company that is not active
+(or not recorded as active) must never be presented as a confirmed active maker.
 
 Values below are illustrative - build the UI from the shapes, not the numbers.
 
@@ -189,6 +202,54 @@ Values below are illustrative - build the UI from the shapes, not the numbers.
         "name": "ACME FOODS PRIVATE LIMITED",
         "status": "Strike Off",
         "matched_on": "cin"
+      }
+    }
+  ]
+}
+```
+
+`MCA_COMPANY_STATUS_UNKNOWN` - the CIN is in the register, but with no status:
+
+```json
+{
+  "id": "company",
+  "status": "warn",
+  "flags": [
+    {
+      "code": "MCA_COMPANY_STATUS_UNKNOWN",
+      "severity": "medium",
+      "en": "This CIN is in the MCA register but no company status is recorded for it, so the maker's registration cannot be confirmed as Active.",
+      "hi": "यह CIN MCA रजिस्टर में है, परंतु इसके लिए कंपनी की स्थिति दर्ज नहीं है, इसलिए निर्माता का पंजीकरण Active होने की पुष्टि नहीं हो सकती।",
+      "evidence": {
+        "cin": "U15100MH2009PTC123456",
+        "name": "ACME FOODS PRIVATE LIMITED",
+        "status": null,
+        "matched_on": "cin"
+      }
+    }
+  ]
+}
+```
+
+`MCA_NAME_ONLY_MATCH_NOT_ACTIVE` - a name match whose record is not Active. Two
+doubts at once: the identity is unconfirmed *and* the record is not Active:
+
+```json
+{
+  "id": "company",
+  "status": "warn",
+  "flags": [
+    {
+      "code": "MCA_NAME_ONLY_MATCH_NOT_ACTIVE",
+      "severity": "medium",
+      "en": "The manufacturer name matched an MCA record by name only, and that record is not Active (recorded as 'Strike Off'). Confirm the CIN: a name match may be a different company, and if it is the same one its registration may no longer be active.",
+      "hi": "निर्माता का नाम MCA रिकॉर्ड से केवल नाम के आधार पर मिला है, और वह रिकॉर्ड Active नहीं है (दर्ज स्थिति 'Strike Off')। CIN की पुष्टि करें: नाम का मिलान किसी और कंपनी का हो सकता है, और यदि वही कंपनी है तो उसका पंजीकरण अब सक्रिय नहीं हो सकता।",
+      "evidence": {
+        "manufacturer": "ACME FOODS PRIVATE LIMITED",
+        "cin": "U15100MH2009PTC123456",
+        "status": "Strike Off",
+        "similarity": 0.91,
+        "matched_on": "name"
       }
     }
   ]

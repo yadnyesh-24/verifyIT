@@ -1,5 +1,5 @@
 {
-  "scan_id": null,
+  "scan_id": "<generated>",
   "status": "not_checked",
   "reason": "OCR pipeline not connected",
   "fields": {}

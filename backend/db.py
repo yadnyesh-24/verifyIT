@@ -40,6 +40,14 @@ CONNECT_TIMEOUT_SECONDS = 2
 
 #: Session settings applied to every connection this module opens.
 #:
+#: ``search_path`` lists ``extensions`` as well as ``public`` because Supabase
+#: installs ``pg_trgm`` in a schema called ``extensions``, while the local Homebrew
+#: PostgreSQL puts it in ``public``. Listing both makes the same
+#: ``similarity()`` / ``%`` queries resolve on **either** database, and PostgreSQL
+#: ignores a schema in ``search_path`` that does not exist - so one setting covers
+#: both setups instead of the company check silently degrading to ``not_checked``
+#: on Supabase (``fetch_all`` swallows the "function does not exist" error).
+#:
 #: ``pg_trgm``'s default similarity threshold is 0.30, which is far too
 #: permissive for a two-word company name. On the full 2M-row MCA snapshot the
 #: ``%`` scan then hands the executor ~131k candidates and ~55k heap pages to
@@ -50,7 +58,10 @@ CONNECT_TIMEOUT_SECONDS = 2
 #: It must stay strictly below ``backend.mca.NAME_MATCH_THRESHOLD`` so it can
 #: never hide a match the matcher would have accepted - ``tests/test_mca.py``
 #: asserts exactly that.
-SESSION_SETTINGS: dict[str, str] = {"pg_trgm.similarity_threshold": "0.55"}
+SESSION_SETTINGS: dict[str, str] = {
+    "search_path": "public, extensions",
+    "pg_trgm.similarity_threshold": "0.55",
+}
 
 
 class DatabaseUnavailable(RuntimeError):

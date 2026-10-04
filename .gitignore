@@ -20,6 +20,13 @@ wheels/
 .installed.cfg
 *.egg
 
+# The `lib/` rule above is the Python build-artefact rule. The frontend's source
+# directory is *also* called `lib/`, and git swallowed it silently - which is
+# exactly how `frontend/lib/` went missing once. Keep this negation (and the test
+# in `tests/test_repo_hygiene.py` that guards it).
+!frontend/lib/
+!frontend/lib/**
+
 # Virtual environments
 .venv/
 venv/

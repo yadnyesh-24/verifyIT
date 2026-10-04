@@ -85,12 +85,12 @@ function ResultsContent() {
 
       <Card>
         <CardContent className="flex flex-col items-center gap-4 p-6">
-          <ScoreGauge score={results.score} lang={lang} />
-          {results.verdict === "not_checked" ? (
-            <p className="text-center text-sm text-muted-foreground">
-              {t(lang, "results.verdictPending")}
-            </p>
-          ) : null}
+          <ScoreGauge
+            score={results.score}
+            checksRan={results.checks_ran}
+            verdict={results.verdict}
+            lang={lang}
+          />
         </CardContent>
       </Card>
 

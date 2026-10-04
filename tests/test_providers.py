@@ -224,4 +224,22 @@ def test_build_scan_placeholder() -> None:
     assert result["status"] == providers.STATUS_NOT_CHECKED
     assert result["reason"] == providers.OCR_PENDING_REASON
     assert result["fields"] == {}
-    assert result["scan_id"] is None
+    assert result["scan_id"].startswith(providers.SCAN_ID_PREFIX)
+
+
+def test_build_scan_accepts_an_explicit_scan_id() -> None:
+    assert providers.build_scan(scan_id="scan_abc")["scan_id"] == "scan_abc"
+
+
+def test_new_scan_id_is_unique() -> None:
+    assert providers.new_scan_id() != providers.new_scan_id()
+
+
+def test_build_verification_echoes_the_scan_id() -> None:
+    result = providers.build_verification(scan_id="scan_abc")
+    assert result["scan_id"] == "scan_abc"
+
+
+def test_build_verification_has_no_scan_id_by_default() -> None:
+    """No scan happened -> no id is invented."""
+    assert providers.build_verification()["scan_id"] is None

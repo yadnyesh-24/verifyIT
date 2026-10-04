@@ -81,6 +81,44 @@ def test_trigram_floor_prunes_without_hiding_matches() -> None:
     assert 0.30 < floor < mca.NAME_MATCH_THRESHOLD
 
 
+def test_registry_search_path_can_reach_pg_trgm_in_any_schema() -> None:
+    """``pg_trgm`` is in ``public`` locally and in ``extensions`` on Supabase.
+
+    The registry connection has to be able to call ``similarity()`` / ``%`` on
+    either, otherwise the company check silently degrades to ``not_checked``
+    because ``db.fetch_all`` swallows the "function does not exist" error.
+    """
+    search_path = db.SESSION_SETTINGS["search_path"]
+    schemas = [part.strip() for part in search_path.split(",")]
+    assert "public" in schemas  # the companies table lives here on both setups
+    assert "extensions" in schemas  # where Supabase installs pg_trgm
+
+
+def test_registry_connection_is_local_unless_asked_otherwise() -> None:
+    """With no ``DATABASE_URL`` the API must never reach a cloud database.
+
+    The Supabase database is the pincode/state ingestion toolchain's, reached only
+    through ``backend/app/db.py``. The API's default has to stay on loopback so a
+    missing ``.env`` can never silently point the registry at the cloud.
+    """
+    assert db.DEFAULT_DATABASE_URL.startswith("postgresql://127.0.0.1:5432/")
+    assert "sslmode" not in db.DEFAULT_DATABASE_URL
+
+
+def test_api_never_uses_the_supabase_toolchain_connection() -> None:
+    """Guard the seam between the two database doors.
+
+    ``backend/db.py`` is the registry door the API uses; ``backend/app/db.py`` is
+    the Supabase toolchain (pincode/state imports) and mandates ``sslmode=require``
+    plus its own ``backend/.env``. If the request path ever picked it up, the API
+    would switch databases depending on which ``.env`` happened to exist.
+    """
+    for name in ("main.py", "mca.py", "providers.py", "db.py"):
+        source = (REPO_ROOT / "backend" / name).read_text(encoding="utf-8")
+        assert "app.db" not in source, f"backend/{name} reaches the Supabase toolchain"
+        assert "get_conn" not in source, f"backend/{name} uses the toolchain connection"
+
+
 # --- Pure: importer header/date helpers ---------------------------------------
 
 
@@ -419,16 +457,66 @@ def test_check_company_inactive_cin_warns(monkeypatch: pytest.MonkeyPatch) -> No
     assert flag["evidence"]["matched_on"] == "cin"
 
 
-def test_check_company_missing_status_still_passes(
+def test_check_company_missing_status_is_not_a_confirmed_pass(
     monkeypatch: pytest.MonkeyPatch,
 ) -> None:
-    """A CIN hit with no status column must not become a warning."""
+    """Regression: a CIN hit with no recorded status must never pass.
+
+    The CIN proves the register *contains* the company; it says nothing about
+    whether that company is still live. A missing status is therefore a warning
+    for the user to confirm, not a confirmed active-company pass.
+    """
     _stub_match(monkeypatch, _match(status=None))
-    assert providers.check_company(cin="TESTFIXTURE-CIN-0001")["status"] == "pass"
+    check = providers.check_company(cin="TESTFIXTURE-CIN-0001")
+    assert check["status"] == "warn"
+    flag = check["flags"][0]
+    assert flag["code"] == "MCA_COMPANY_STATUS_UNKNOWN"
+    assert flag["severity"] == "medium"
+    assert flag["en"] and flag["hi"]  # both languages present
+    assert flag["evidence"]["matched_on"] == "cin"
+    assert flag["evidence"]["status"] is None
 
 
-def test_check_company_name_only_match_warns(monkeypatch: pytest.MonkeyPatch) -> None:
-    """A fuzzy name hit is a weak signal: warn, and ask for the CIN."""
+@pytest.mark.parametrize("blank", ["", "   ", "\t"])
+def test_check_company_blank_status_is_not_a_confirmed_pass(
+    monkeypatch: pytest.MonkeyPatch, blank: str
+) -> None:
+    """A whitespace-only status is the same "no information" as a null one."""
+    _stub_match(monkeypatch, _match(status=blank))
+    check = providers.check_company(cin="TESTFIXTURE-CIN-0001")
+    assert check["status"] == "warn"
+    assert check["flags"][0]["code"] == "MCA_COMPANY_STATUS_UNKNOWN"
+
+
+def test_check_company_name_only_match_on_an_active_record_warns_low(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A fuzzy name hit on an Active record is a weak signal: warn, ask for the CIN."""
+    _stub_match(
+        monkeypatch,
+        _match(
+            name="TEST FIXTURE MILLS LIMITED",
+            status="Active",
+            similarity=0.91,
+            matched_on="name",
+        ),
+    )
+    check = providers.check_company(manufacturer_name="Test Fixture Mills Ltd")
+    assert check["status"] == "warn"
+    flag = check["flags"][0]
+    assert flag["code"] == "MCA_NAME_ONLY_MATCH"
+    assert flag["severity"] == "low"
+    assert flag["evidence"]["similarity"] == 0.91
+
+
+def test_check_company_name_only_match_on_a_struck_off_record(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """Regression: a name-only hit on a struck-off record used to be ``low``.
+
+    Both doubts have to be reported, because either one alone understates the
+    situation: the identity is unconfirmed *and* the record is not Active.
+    """
     _stub_match(
         monkeypatch,
         _match(
@@ -441,9 +529,51 @@ def test_check_company_name_only_match_warns(monkeypatch: pytest.MonkeyPatch) ->
     check = providers.check_company(manufacturer_name="Test Fixture Mills Ltd")
     assert check["status"] == "warn"
     flag = check["flags"][0]
-    assert flag["code"] == "MCA_NAME_ONLY_MATCH"
-    assert flag["severity"] == "low"
+    assert flag["code"] == "MCA_NAME_ONLY_MATCH_NOT_ACTIVE"
+    assert flag["severity"] == "medium"
+    assert flag["evidence"]["status"] == "Strike Off"
+    assert flag["evidence"]["matched_on"] == "name"
     assert flag["evidence"]["similarity"] == 0.91
+    # The message must carry both facts, not just one.
+    assert "by name only" in flag["en"]
+    assert "not Active" in flag["en"]
+    assert "Strike Off" in flag["en"]
+    assert flag["hi"]
+
+
+def test_check_company_name_only_match_without_a_status(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """A name match with no recorded status is unknown, not "Active"."""
+    _stub_match(monkeypatch, _match(status=None, similarity=0.9, matched_on="name"))
+    check = providers.check_company(manufacturer_name="Test Fixture Mills Ltd")
+    flag = check["flags"][0]
+    assert flag["code"] == "MCA_NAME_ONLY_MATCH_NOT_ACTIVE"
+    assert "no status recorded" in flag["en"]
+
+
+def test_name_only_struck_off_no_longer_scores_eighty_at_low_risk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The reported bug, end to end: 80 / low_risk for a struck-off name match."""
+    _stub_match(
+        monkeypatch,
+        _match(status="Strike Off", similarity=0.91, matched_on="name"),
+    )
+    result = providers.build_verification(manufacturer_name="Test Fixture Mills Ltd")
+    assert result["checks_ran"] == 1
+    assert result["score"] == 50  # the 40-point company check keeps half its credit
+    assert result["verdict"] == providers.VERDICT_MEDIUM_RISK
+
+
+def test_missing_status_no_longer_scores_a_hundred_at_low_risk(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """The second half of the bug: a status-less CIN hit used to score 100."""
+    _stub_match(monkeypatch, _match(status=None))
+    result = providers.build_verification(cin="TESTFIXTURE-CIN-0001")
+    assert result["score"] == 50
+    assert result["verdict"] == providers.VERDICT_MEDIUM_RISK
 
 
 @pytest.mark.parametrize(
