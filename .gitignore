@@ -52,9 +52,13 @@ coverage.xml
 Thumbs.db
 desktop.ini
 
+# Node (Next.js PWA — Aditya's track)
+node_modules/
+
 # Project: raw data and large artifacts (folder structure stays, contents are ignored)
 data/raw/
 data/processed/
+data/exports/
 data/test_labels/real/*
 !data/test_labels/real/.gitkeep
 data/test_labels/fake/*
@@ -64,6 +68,9 @@ data/test_labels/fake/*
 *.pkl
 *.parquet
 *.csv.zip
+*.csv.gz
+*.dump
+*.sqlite
 
 # Logs
 *.log
