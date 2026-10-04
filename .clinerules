@@ -1,0 +1,99 @@
+# Verify It - Cline project rules
+
+These rules apply to every Cline task in this repository. Keep them in sync with
+`API_CONTRACT.md` (the frontend-facing contract), `FRONTEND_HANDOFF.md` and
+`README.md`.
+
+## Project
+- **Verify It** - hackathon label-verification backend.
+- Python 3.11 + FastAPI + Uvicorn + psycopg 3. Dependencies are pinned in
+  `requirements.txt` (runtime) and `requirements-dev.txt` (tests/tooling).
+- Layout:
+  - `backend/main.py` - FastAPI app: routes, Pydantic schemas, CORS.
+  - `backend/providers.py` - the single place where registry providers
+    (company/CIN, FSSAI, BIS, Surepass) and the OCR pipeline get integrated, and
+    the only place that decides a check status or builds a flag.
+  - `backend/db.py` - the only place that opens a database connection.
+  - `backend/mca.py` - MCA Company Master Data matching (`pg_trgm` + exact CIN).
+  - `sql/001_companies.sql` - the registry schema (idempotent).
+  - `scripts/import_mca.py` - importer for the local registry snapshot.
+  - `tests/` - pytest tests; `samples/` - frozen frontend mock responses.
+  - `data/` - local registry exports (git-ignored, never committed).
+  - `src/` - Sunil's *Read* (OCR) + *Label-law* track; `docs/label_rules.md`
+    holds the Legal Metrology rules it implements.
+
+## Repository & branches
+- Team GitHub repo (this is `origin`): <https://github.com/yadnyesh-24/verifyIT>.
+- Branches: `main` (integration trunk, Aditya), `frontend/yadnyesh` (Yadnyesh),
+  `ocr/sunil` (Sunil). Teammates work on their own branch and PR into `main`.
+- Start: `git clone https://github.com/yadnyesh-24/verifyIT.git && cd verifyIT`
+  then `git checkout <your-branch>`.
+- Sync before you commit: `git pull --rebase origin <your-branch>`, then
+  `git push origin <your-branch>`.
+- Sunil edits only `build_scan()` + `check_label_law()` in `backend/providers.py`.
+  Yadnyesh does not edit this repo's backend at all - the contract is frozen.
+
+## API contract (frozen - change only with docs + tests + samples)
+- `GET /api/health` -> `{"status":"ok","app":"Verify It"}`.
+- `POST /api/scan` (multipart `file`) -> `{scan_id, status, reason, fields}`.
+- `POST /api/verify` (optional JSON body) ->
+  `{scan_id, checks, score, verdict, official_links}`.
+- `checks` is always exactly three, in order: `company`, `licence`, `label_law`.
+- A check status is one of `pass`, `warn`, `fail`, `not_checked`.
+- A flag is `{code, severity, en, hi, evidence}`; `severity` is `high|medium|low`.
+  Known codes: `FSSAI_FORMAT_INVALID` (licence), `MCA_COMPANY_NOT_ACTIVE` and
+  `MCA_NAME_ONLY_MATCH` (company). `evidence` must stay JSON-serialisable.
+- The `company` check: exact `cin` hit with an Active status -> `pass`; a non-Active
+  status or a fuzzy name-only hit -> `warn`; anything else -> `not_checked`. It
+  never returns `fail`.
+- `official_links[]` is `{label, url, copy}` (copy the number, open the portal).
+
+## Non-negotiable correctness rules
+- **Never invent registry data.** Anything the API reports must come from a real
+  government export (today: the MCA *Company Master Data* snapshot) or from a
+  deterministic check on the label itself. A check whose registry is not connected
+  is `status: "not_checked"`, and `score`/`verdict` stay `null`/`"not_checked"`
+  until every check can run. No fake companies, licences, CINs, trust scores or
+  verdicts. Ever.
+- **A miss is not a failure.** A company absent from the MCA snapshot stays
+  `not_checked` - the snapshot is a dated export and can lag. The `company` check
+  never emits `fail`; `pass` requires an exact CIN whose recorded status is Active.
+- **Synthetic rows stay in tests.** Fixtures live in a session-local
+  `TEMP TABLE companies` with CINs prefixed `TESTFIXTURE`, and the matcher accepts
+  an explicit `conn` for that. Never write synthetic rows into the persistent
+  `companies` table.
+- **No registry API calls.** The one data source is a PostgreSQL snapshot of a
+  government export, reached *only* through `backend/db.py`. `DATABASE_URL` may
+  point at a local database (the default) or at the team's shared Postgres, but
+  never at a live registry: no HTTP calls in routes, no hidden fetches at request
+  time. `backend/db.py` must degrade to "no information" (`None`) when the
+  database is missing or unreachable, so `/api/verify` never 500s because Postgres
+  is down.
+- **`not_checked` is not a failure and not a pass.** It means the check has not
+  run yet; the UI renders it as "Verification pending".
+- **FSSAI format = exactly 14 ASCII digits.** Use the compiled regex
+  `[0-9]{14}` with `fullmatch`. Do **not** use `str.isdigit()`/`str.isdecimal()`
+  (they accept Unicode digits such as Arabic-Indic, which must be rejected).
+  No trimming is applied. A valid format produces **no** flag and leaves the
+  `licence` check `not_checked` - it is never a licence-validity result.
+- **Keep the response contract stable.** Renaming/removing response fields breaks
+  the frontend. Any contract change must update `API_CONTRACT.md`,
+  `FRONTEND_HANDOFF.md`, `README.md`, `samples/` and the tests in the same
+  change (`tests/test_samples.py` enforces the samples).
+
+## Style
+- Keep the existing docstring style: every module, class and public function has
+  a short docstring.
+- Prefer small pure functions in `backend/providers.py`; keep routes thin.
+- Type-hint everything (`str | None`, `dict[str, Any]`, ...).
+- Do not add new runtime dependencies without updating `requirements.txt`.
+
+## Testing
+- Tests live in `tests/` and run with `./.venv/bin/python -m pytest`. The suite
+  must pass with **no database running** - database-dependent tests skip
+  themselves - so keep pure logic pure and put anything DB-bound behind the skip.
+- Add/extend tests with every behaviour change. Cover: scan with/without file,
+  verify empty/no/partial body, valid + invalid FSSAI formats (incl. Unicode
+  digits), CORS, official links, the "no invented fields" invariant, MCA name
+  normalisation and matching, the importer's header/date handling, and the
+  `check_company` status mapping (including "never `fail`").

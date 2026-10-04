@@ -1,13 +1,95 @@
-# large data, shared outside Git
-data/raw/
-data/exports/
+# ---------- Python ----------
+__pycache__/
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
+*.egg-info/
+.installed.cfg
+*.egg
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+.envrc
+
+# Environment / secrets — NEVER commit
+.env
+.env.*
+!.env.example
+
+# pytest / coverage / caches
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+.coverage.*
+htmlcov/
+.tox/
+.cache
+coverage.xml
+
+# IDEs / OS
+.idea/
+.vscode/
+!.vscode/extensions.json
+!.vscode/settings.json
+.DS_Store
+Thumbs.db
+desktop.ini
+
+# Node (Next.js PWA — Yadnyesh's track)
+node_modules/
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+.next/
+out/
+
+# Runtime state (GitHub watcher scripts, caches, etc.)
+.state/
+.state
 *.dump
 *.sqlite
-*.csv.gz
 
+<<<<<<< HEAD
 # environments and secrets
 .venv/
 node_modules/
 .env
 __pycache__/
 .pytest_cache/
+=======
+# Uploaded images (runtime user uploads)
+uploads/
+**/uploads/
+
+# Local registry snapshots / government exports (large, re-downloadable).
+# The CSV template is kept so everyone knows the expected columns.
+*.csv
+*.zip
+!samples/*.csv
+!data/reference/*.csv
+!data/ground_truth.csv
+!data/mca/company_master_data_TEMPLATE.csv
+
+# Captured test-label photos: keep the folders, ignore the photos
+data/test_labels/real/*
+data/test_labels/fake/*
+!data/test_labels/real/.gitkeep
+!data/test_labels/fake/.gitkeep
+>>>>>>> 05873aaa0c3b7fc03bfc4c5c3e620602919fad79

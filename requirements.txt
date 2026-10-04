@@ -1,0 +1,28 @@
+# VerifyIT — shared runtime dependencies (backend API + OCR / vision + data).
+# Python 3.11. Setup instructions live in README.md.
+
+# --- Backend API (Aditya) ---
+fastapi==0.142.2
+uvicorn[standard]==0.54.0
+python-multipart==0.0.32
+psycopg[binary]==3.3.6
+
+# --- OCR / vision (Sunil's Read track) ---
+numpy
+opencv-python
+pytesseract
+Pillow
+
+# --- Data + scoring ---
+pandas
+scikit-learn
+
+# --- Optional fast JSON I/O for evaluation ---
+pyarrow
+
+# --- LLM fallback (Gemini) ---
+google-generativeai
+
+# --- Dev utilities ---
+pytest
+python-dotenv
