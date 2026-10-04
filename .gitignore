@@ -55,6 +55,9 @@ desktop.ini
 # Node (Next.js PWA — Aditya's track)
 node_modules/
 
+# Runtime state (GitHub watcher, caches, etc.)
+.state/
+
 # Project: raw data and large artifacts (folder structure stays, contents are ignored)
 data/raw/
 data/processed/
