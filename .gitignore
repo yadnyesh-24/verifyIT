@@ -66,14 +66,6 @@ out/
 *.dump
 *.sqlite
 
-<<<<<<< HEAD
-# environments and secrets
-.venv/
-node_modules/
-.env
-__pycache__/
-.pytest_cache/
-=======
 # Uploaded images (runtime user uploads)
 uploads/
 **/uploads/
@@ -92,4 +84,3 @@ data/test_labels/real/*
 data/test_labels/fake/*
 !data/test_labels/real/.gitkeep
 !data/test_labels/fake/.gitkeep
->>>>>>> 05873aaa0c3b7fc03bfc4c5c3e620602919fad79
