@@ -1,0 +1,39 @@
+{
+  "scan_id": null,
+  "checks": [
+    {
+      "id": "company",
+      "status": "not_checked",
+      "flags": []
+    },
+    {
+      "id": "licence",
+      "status": "warn",
+      "flags": [
+        {
+          "code": "FSSAI_FORMAT_INVALID",
+          "severity": "medium",
+          "en": "The FSSAI number is not 14 digits - it may be misread or misprinted.",
+          "hi": "FSSAI नंबर 14 अंकों का नहीं है - यह गलत पढ़ा या गलत छपा हो सकता है।",
+          "evidence": {
+            "fssai": "123"
+          }
+        }
+      ]
+    },
+    {
+      "id": "label_law",
+      "status": "not_checked",
+      "flags": []
+    }
+  ],
+  "score": null,
+  "verdict": "not_checked",
+  "official_links": [
+    {
+      "label": "Verify FSSAI licence",
+      "url": "https://foscos.fssai.gov.in/",
+      "copy": "123"
+    }
+  ]
+}

@@ -1,0 +1,56 @@
+# Verify It - Cline project rules
+
+These rules apply to every Cline task in this repository. Keep them in sync with
+`API_CONTRACT.md` (the frontend-facing contract), `FRONTEND_HANDOFF.md` and
+`README.md`.
+
+## Project
+- **Verify It** - hackathon label-verification backend.
+- Python 3.11 + FastAPI + Uvicorn. Dependencies are pinned in `requirements.txt`
+  (runtime) and `requirements-dev.txt` (tests/tooling).
+- Layout:
+  - `backend/main.py` - FastAPI app: routes, Pydantic schemas, CORS.
+  - `backend/providers.py` - the single place where registry providers
+    (company/CIN, FSSAI, BIS, Surepass) and the OCR pipeline get integrated.
+  - `tests/` - pytest tests; `samples/` - frozen frontend mock responses.
+
+## API contract (frozen - change only with docs + tests + samples)
+- `GET /api/health` -> `{"status":"ok","app":"Verify It"}`.
+- `POST /api/scan` (multipart `file`) -> `{scan_id, status, reason, fields}`.
+- `POST /api/verify` (optional JSON body) ->
+  `{scan_id, checks, score, verdict, official_links}`.
+- `checks` is always exactly three, in order: `company`, `licence`, `label_law`.
+- A check status is one of `pass`, `warn`, `fail`, `not_checked`.
+- A flag is `{code, severity, en, hi, evidence}`; `severity` is `high|medium|low`.
+- `official_links[]` is `{label, url, copy}` (copy the number, open the portal).
+
+## Non-negotiable correctness rules
+- **Never invent registry data.** Until a provider is connected, every check is
+  `status: "not_checked"` and `score`/`verdict` stay `null`/`"not_checked"`. No
+  fake companies, licences, CINs, trust scores or verdicts. Ever.
+- **No external network calls** anywhere until the integration lands in
+  `backend/providers.py`. Do not add hidden HTTP calls in routes.
+- **`not_checked` is not a failure and not a pass.** It means the check has not
+  run yet; the UI renders it as "Verification pending".
+- **FSSAI format = exactly 14 ASCII digits.** Use the compiled regex
+  `[0-9]{14}` with `fullmatch`. Do **not** use `str.isdigit()`/`str.isdecimal()`
+  (they accept Unicode digits such as Arabic-Indic, which must be rejected).
+  No trimming is applied. A valid format produces **no** flag and leaves the
+  `licence` check `not_checked` - it is never a licence-validity result.
+- **Keep the response contract stable.** Renaming/removing response fields breaks
+  the frontend. Any contract change must update `API_CONTRACT.md`,
+  `FRONTEND_HANDOFF.md`, `README.md`, `samples/` and the tests in the same
+  change (`tests/test_samples.py` enforces the samples).
+
+## Style
+- Keep the existing docstring style: every module, class and public function has
+  a short docstring.
+- Prefer small pure functions in `backend/providers.py`; keep routes thin.
+- Type-hint everything (`str | None`, `dict[str, Any]`, ...).
+- Do not add new runtime dependencies without updating `requirements.txt`.
+
+## Testing
+- Tests live in `tests/` and run with `./.venv/bin/python -m pytest`.
+- Add/extend tests with every behaviour change. Cover: scan with/without file,
+  verify empty/no/partial body, valid + invalid FSSAI formats (incl. Unicode
+  digits), CORS, official links, and the "no invented fields" invariant.
