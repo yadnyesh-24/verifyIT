@@ -23,6 +23,37 @@ def test_health_ok() -> None:
     assert resp.json() == {"status": "ok", "app": "Verify It"}
 
 
+# --- GET /health (liveness + database) ---------------------------------------
+
+
+def test_health_with_db_reports_the_database(monkeypatch: pytest.MonkeyPatch) -> None:
+    """``db`` mirrors the registry probe, and the API stays ``ok`` either way."""
+    monkeypatch.setattr(main.db, "is_available", lambda: True)
+    assert client.get("/health").json() == {"status": "ok", "db": True}
+
+    monkeypatch.setattr(main.db, "is_available", lambda: False)
+    assert client.get("/health").json() == {"status": "ok", "db": False}
+
+
+def test_health_with_db_survives_an_unreachable_database(
+    monkeypatch: pytest.MonkeyPatch,
+) -> None:
+    """No database must never mean no health route - it degrades, not 500s."""
+    monkeypatch.setattr(main.db, "is_available", lambda: False)
+    resp = client.get("/health")
+    assert resp.status_code == 200
+    assert resp.json()["status"] == "ok"
+
+
+def test_api_health_stays_free_of_the_db_field() -> None:
+    """The two routes answer different questions and must not merge.
+
+    ``/api/health`` is compared byte for byte by ``tests/test_samples.py`` and by
+    ``test_health_ok``; adding a key to it would break every frozen fixture.
+    """
+    assert "db" not in client.get("/api/health").json()
+
+
 # --- POST /api/scan ---------------------------------------------------------
 
 
@@ -240,6 +271,46 @@ def test_cors_allows_frontend_dev_origin() -> None:
     )
     assert resp.status_code == 200
     assert resp.headers["access-control-allow-origin"] == "http://localhost:3000"
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://192.168.1.14:3000",
+        "http://10.0.0.5:3000",
+        "http://172.17.21.35:3000",
+    ],
+)
+def test_cors_allows_private_network_origins(origin: str) -> None:
+    """A phone on the same Wi-Fi can reach the dev server without a code change.
+
+    The IP changes with every network, so it is matched by range rather than
+    listed - but only the RFC 1918 ranges, never ``*``.
+    """
+    resp = client.options(
+        "/api/verify",
+        headers={"Origin": origin, "Access-Control-Request-Method": "POST"},
+    )
+    assert resp.status_code == 200
+    assert resp.headers["access-control-allow-origin"] == origin
+
+
+@pytest.mark.parametrize(
+    "origin",
+    [
+        "http://172.15.0.1:3000",  # just below the 172.16-31 private block
+        "http://172.32.0.1:3000",  # just above it
+        "http://8.8.8.8:3000",     # a public address
+        "https://192.168.1.14",    # https is not what the dev server serves
+    ],
+)
+def test_cors_rejects_public_lookalike_origins(origin: str) -> None:
+    """The LAN regex must not leak past the private ranges it exists for."""
+    resp = client.options(
+        "/api/verify",
+        headers={"Origin": origin, "Access-Control-Request-Method": "POST"},
+    )
+    assert resp.headers.get("access-control-allow-origin") != origin
 
 
 def test_cors_does_not_allow_unknown_origin() -> None:

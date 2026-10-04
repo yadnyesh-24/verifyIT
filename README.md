@@ -109,7 +109,7 @@ code is in `main`, covered by tests, and returns real data.
 | OCR (`src/*.py`) | **Not started** — no modules committed yet |
 | Label-law rules (`docs/label_rules.md`) | **Not started** — `label_law` is still a `not_checked` placeholder, but every confirmed field is already forwarded to it |
 | FSSAI / BIS registry lookups (Surepass) | **Not connected** — no credentials exist, so those checks stay `not_checked` and the API returns official portal links instead |
-| Frontend PWA (`frontend/`) | **Does not build from a fresh clone yet** — the app folder is committed but `frontend/lib/*` is not, and the components import it. Sunil's track; unblocked once those modules are committed (the `.gitignore` rule that hid them is fixed) |
+| Frontend PWA (`frontend/`) | **Builds and runs** — `frontend/lib/*` is committed, the UI is wired to the real API through Next rewrites, and `npm run smoke` checks every response against the contract |
 
 ## Setup
 
@@ -128,6 +128,58 @@ Tesseract (with `eng` + `hin`) is only needed for the OCR track:
 ```bash
 tesseract --list-langs   # must show: eng, hin
 ```
+
+## Running the whole app (one command)
+
+```bash
+npm install                 # once, at the repo root (installs concurrently)
+npm install --prefix frontend
+npm run dev:all
+```
+
+That starts both halves with coloured prefixes - `[api]` on
+<http://localhost:8000> and `[web]` on <http://localhost:3000> - and works
+identically on Windows, macOS and Linux. The Python interpreter is resolved by
+`scripts/dev-api.mjs` (`.venv\Scripts\python.exe` or `.venv/bin/python`), so
+there is no separate Windows variant to remember.
+
+Open <http://localhost:3000>. The frontend only ever calls relative `/api/...`
+URLs, which `frontend/next.config.mjs` rewrites to `BACKEND_URL`
+(default `http://localhost:8000`) - so the browser stays on one origin and never
+needs a CORS preflight.
+
+| Variable | Default | What it does |
+| -------- | ------- | ------------ |
+| `BACKEND_URL` | `http://localhost:8000` | Where the rewrites point. Server-side only. |
+| `NEXT_PUBLIC_DATA_MODE` | `auto` | `auto` uses the API when `/api/health/db` answers and bundled fixtures otherwise; `live` and `mock` force one or the other. |
+| `API_PORT` | `8000` | Port for uvicorn. |
+| `API_RELOAD` | `1` | `0` drops uvicorn's watcher process - useful on a low-memory machine. |
+
+### Smoke test
+
+With both servers running:
+
+```bash
+npm run smoke
+```
+
+It POSTs every `samples/verify_request_*.json` and one image from
+`data/test_labels/real/` **through the frontend** at `localhost:3000`, so the
+rewrites, the ports and the multipart field name are all exercised. Each
+response is parsed with the very same zod schemas the app uses
+(`frontend/lib/contract.ts`, imported directly - Node strips the types), then
+checked against the contract invariants a schema cannot express: three checks in
+a fixed order, `score` and `checks_ran` agreeing, and `scan_id` echoed rather
+than minted. It prints a pass/fail table and exits non-zero on any failure.
+
+### If a build or dev server dies with "out of memory"
+
+On a machine near its Windows commit limit, V8 aborts with
+`Zone Allocation failed` while its heap is only tens of megabytes - the *OS* is
+refusing the reservation, so raising `--max-old-space-size` makes it worse.
+`frontend/scripts/build.mjs` and `frontend/scripts/dev.mjs` therefore cap the
+heap (override with `BUILD_HEAP_MB` / `DEV_HEAP_MB`). If it still fails, close
+some applications or enlarge the page file.
 
 ## The backend API
 
@@ -149,7 +201,8 @@ on purpose; `*` is never opened. See
 
 | Method | Path | Description |
 | ------ | ---- | ----------- |
-| GET | `/api/health` | Liveness check used by the frontend. |
+| GET | `/api/health` | Liveness check. Frozen shape: `{"status":"ok","app":"Verify It"}`. |
+| GET | `/health` | Liveness **plus** whether the registry database answers: `{"status":"ok","db":true\|false}`. Reached from the frontend as `/api/health/db`. |
 | POST | `/api/scan` | Read a label photo, return the extracted fields. |
 | POST | `/api/verify` | Confirmed fields → checks, score and official links. |
 
@@ -264,7 +317,15 @@ available, replace those `check_*` functions; the route handlers and schemas in
 ## CORS
 
 The API allows requests from the frontend dev server at `http://localhost:3000`
-and `http://127.0.0.1:3000`.
+and `http://127.0.0.1:3000`, plus any `http://` origin on a private network
+(`192.168.x.x`, `10.x.x.x`, `172.16-31.x.x`) on any port - that is what lets a
+phone on the same Wi-Fi open the dev server without editing code every time the
+network hands out a new IP. Only those RFC 1918 ranges match; a public address
+still has to be added by hand, and `*` is never opened.
+
+In practice the browser rarely needs any of this: the frontend calls relative
+`/api/...` URLs that Next rewrites server-side, so requests reach the API from
+the Next process rather than cross-origin from the page.
 
 ## Done means
 

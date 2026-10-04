@@ -1,0 +1,16 @@
+{
+  "scan_id": "scan_0123456789abcdef0123456789abcdef",
+  "manufacturer": "Example Foods Pvt Ltd",
+  "address": "12 Example Road, Mumbai",
+  "pincode": "400001",
+  "fssai": "10012022000123",
+  "bis_licence": "CM/L-1234567890",
+  "mrp": "50.00",
+  "net_qty": "70 g",
+  "mfg_date": "2026-01-01",
+  "expiry": "2027-01-01",
+  "customer_care": "1800-000-0000",
+  "cin": "U15100MH2009PTC123456",
+  "gstin": "27AAACR5055K1Z5",
+  "product_name": "Example Namkeen"
+}

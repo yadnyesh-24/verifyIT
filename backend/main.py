@@ -20,7 +20,7 @@ from fastapi import FastAPI, File, UploadFile
 from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
-from backend import providers
+from backend import db, providers
 
 # Load `.env` (git-ignored) when it exists so DATABASE_URL, GEMINI_API_KEY, ...
 # can be set once per machine instead of exported by hand. Real environment
@@ -40,6 +40,18 @@ ALLOWED_ORIGINS = [
     "http://localhost:3000",
     "http://127.0.0.1:3000",
 ]
+
+#: Private-network origins allowed in addition to ``ALLOWED_ORIGINS``, so the dev
+#: server can be opened from a phone on the same Wi-Fi without hard-coding an IP
+#: that changes with every network. Only the RFC 1918 ranges match - a public host
+#: still has to be added to ``ALLOWED_ORIGINS`` by hand, and ``*`` is never opened.
+LAN_ORIGIN_REGEX = (
+    r"http://(?:"
+    r"192\.168\.\d{1,3}\.\d{1,3}"
+    r"|10\.\d{1,3}\.\d{1,3}\.\d{1,3}"
+    r"|172\.(?:1[6-9]|2\d|3[01])\.\d{1,3}\.\d{1,3}"
+    r")(?::\d+)?"
+)
 
 #: Confirmed label fields forwarded to the label-law checker, in the order the
 #: review screen collects them. ``scan_id`` is deliberately absent: it identifies
@@ -65,6 +77,7 @@ app = FastAPI(title=APP_NAME)
 app.add_middleware(
     CORSMiddleware,
     allow_origins=ALLOWED_ORIGINS,
+    allow_origin_regex=LAN_ORIGIN_REGEX,
     allow_credentials=True,
     allow_methods=["*"],
     allow_headers=["*"],
@@ -177,6 +190,25 @@ class VerifyResponse(BaseModel):
 def health() -> dict[str, str]:
     """Return a simple liveness payload for client and uptime checks."""
     return {"status": "ok", "app": APP_NAME}
+
+
+@app.get("/health")
+def health_with_db() -> dict[str, Any]:
+    """Return liveness plus whether the registry database answers.
+
+    Separate from ``/api/health`` on purpose. That route is a *frozen* contract -
+    ``tests/test_samples.py`` and ``tests/test_api.py`` compare it byte for byte -
+    and it answers one question: is the process up. This route answers the extra
+    question the frontend needs to pick live or demo data: is the registry behind
+    it reachable too.
+
+    ``db`` is a fact, never a guess: ``db.is_available`` runs ``SELECT 1`` behind a
+    two-second connect timeout and returns ``False`` rather than raising, so an
+    unreachable database degrades this route instead of breaking it. ``status``
+    stays ``"ok"`` either way - the API itself is still serving honest
+    ``not_checked`` results with no database.
+    """
+    return {"status": "ok", "db": db.is_available()}
 
 
 @app.post("/api/scan", response_model=ScanResponse)

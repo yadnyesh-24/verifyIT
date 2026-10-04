@@ -1,248 +1,258 @@
 /**
- * Results page.
+ * Results: the score, the three checks, what was flagged, and how to confirm
+ * any of it yourself.
  *
- * Renders the `VerifyResponse` the backend returned. If no results are
- * available (e.g. someone landed on `/results` without scanning), we route them
- * to the home page with a toast.
+ * The screen is built so that "we could not check this" always reads as
+ * pending. `not_checked` gets a grey "Verification pending" badge and no score
+ * contribution; a null score shows an em dash. Nothing here upgrades an absence
+ * of evidence into a verdict.
  */
 "use client";
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { Copy, ExternalLink, RotateCcw, AlertTriangle } from "lucide-react";
+import {
+  Building2,
+  FileCheck2,
+  ScrollText,
+  Copy,
+  ExternalLink,
+  RotateCcw,
+  PencilLine,
+  Info,
+} from "lucide-react";
 import { toast } from "sonner";
+import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { Header } from "@/components/header";
-import { ErrorBoundary } from "@/components/error-boundary";
-import { Skeleton } from "@/components/ui/skeleton";
-import { StatusBadge } from "@/components/ui/badge";
+import { StatusBadge, SeverityDot } from "@/components/ui/badge";
 import { ScoreGauge } from "@/components/score-gauge";
 import { useScan } from "@/lib/scan-store";
 import { t, tRole } from "@/lib/i18n";
-import type {
-  Check,
-  Flag,
-  Lang,
-  PartyRole,
-  VerifyResponse,
-} from "@/lib/types";
+import type { Check, CheckId, Flag, Lang, Party, VerifyResponse } from "@/lib/types";
 
-const SEVERITY_CLASS: Record<Flag["severity"], string> = {
-  high: "border-destructive/50 bg-destructive/10 text-destructive",
-  medium: "border-warning/50 bg-warning/10 text-warning",
-  low: "border-border bg-muted/50 text-muted-foreground",
+const CHECK_META: Record<CheckId, { icon: typeof Building2; title: Parameters<typeof t>[1] }> = {
+  company: { icon: Building2, title: "results.company" },
+  licence: { icon: FileCheck2, title: "results.licence" },
+  label_law: { icon: ScrollText, title: "results.labelRules" },
 };
 
 export default function ResultsPage() {
   return (
-    <ErrorBoundary>
-      <Header />
-      <main className="container py-6 sm:py-10">
-        <React.Suspense fallback={<ResultsSkeleton />}>
-          <ResultsContent />
-        </React.Suspense>
-      </main>
-    </ErrorBoundary>
+    <PageShell className="pb-32">
+      <React.Suspense fallback={null}>
+        <ResultsContent />
+      </React.Suspense>
+    </PageShell>
   );
 }
 
 function ResultsContent() {
   const router = useRouter();
   const params = useSearchParams();
-  const mockParam = params.get("mock");
-  const { lang, results, parties, reset } = useScan();
+  const { lang, results, draft, reset } = useScan();
 
+  const mock = params.get("mock");
+  const query = mock ? `?mock=${mock}` : "";
+
+  // Nothing to show means they never verified - send them back to start.
   React.useEffect(() => {
-    if (!results) {
-      router.replace(`/${mockParam ? `?mock=${mockParam}` : ""}`);
-    }
-  }, [results, router, mockParam]);
+    if (!results) router.replace(`/${query}`);
+  }, [results, router, query]);
 
   if (!results) return null;
 
-  const scanAnother = () => {
-    reset();
-    router.push(`/${mockParam ? `?mock=${mockParam}` : ""}`);
-  };
-
-  const copyAndOpen = async (url: string, copy: string) => {
-    try {
-      if (navigator.clipboard?.writeText) {
-        await navigator.clipboard.writeText(copy);
-      }
-    } catch {
-      /* clipboard blocked - still open the portal */
-    }
-    window.open(url, "_blank", "noopener,noreferrer");
-    toast.success(t(lang, "results.numberCopied"));
-  };
-
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
+    <>
       <h1 className="sr-only">{t(lang, "results.title")}</h1>
 
-      <Card>
-        <CardContent className="flex flex-col items-center gap-4 p-6">
-          <ScoreGauge score={results.score} lang={lang} />
+      <Card className="overflow-hidden">
+        <CardContent className="flex flex-col items-center gap-2 p-8 sm:p-10">
+          <ScoreGauge
+            score={results.score}
+            verdict={results.verdict}
+            checksRan={results.checks_ran}
+            lang={lang}
+          />
           {results.verdict === "not_checked" ? (
-            <p className="text-center text-sm text-muted-foreground">
+            <p className="mt-2 max-w-md text-center text-sm text-muted-foreground">
               {t(lang, "results.verdictPending")}
             </p>
           ) : null}
         </CardContent>
       </Card>
 
-      <section
-        aria-label="Checks"
-        className="grid grid-cols-1 gap-3 sm:grid-cols-3"
-      >
+      <section aria-label={t(lang, "results.title")} className="mt-6 grid gap-4 sm:grid-cols-3">
         {results.checks.map((check) => (
           <CheckCard key={check.id} check={check} lang={lang} />
         ))}
       </section>
 
-      <FlagsByParty results={results} lang={lang} parties={parties} />
+      <FlagGroups results={results} parties={draft?.parties ?? []} lang={lang} />
 
       {results.official_links.length > 0 ? (
-        <Card>
+        <Card className="mt-6">
           <CardHeader>
-            <CardTitle>Official portals</CardTitle>
+            <CardTitle>{t(lang, "results.officialTitle")}</CardTitle>
+            <p className="text-sm text-muted-foreground">
+              {t(lang, "results.officialBody")}
+            </p>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {results.official_links.map((link, i) => (
-              <div
-                key={`${link.url}-${i}`}
-                className="flex flex-wrap items-center justify-between gap-3 rounded-md border bg-background p-3"
+          <CardContent className="space-y-3">
+            {results.official_links.map((link, index) => (
+              <Button
+                key={`${link.url}-${index}`}
+                variant="outline"
+                size="xl"
+                className="h-auto w-full justify-between gap-4 px-5 py-4 text-left"
+                onClick={() => copyAndOpen(link.url, link.copy, lang)}
               >
-                <div className="space-y-1">
-                  <p className="text-sm font-medium">{link.label}</p>
-                  <p className="font-mono text-xs text-muted-foreground">
+                <span className="flex min-w-0 flex-col items-start gap-0.5">
+                  <span className="text-base font-bold">{link.label}</span>
+                  <span className="truncate font-mono text-sm font-normal text-muted-foreground">
                     {link.copy}
-                  </p>
-                </div>
-                <Button onClick={() => copyAndOpen(link.url, link.copy)}>
+                  </span>
+                </span>
+                <span className="flex shrink-0 items-center gap-1.5 text-sm font-semibold text-primary">
                   <Copy className="h-4 w-4" aria-hidden="true" />
                   {t(lang, "results.openPortal")}
                   <ExternalLink className="h-3.5 w-3.5" aria-hidden="true" />
-                </Button>
-              </div>
+                </span>
+              </Button>
             ))}
           </CardContent>
         </Card>
       ) : null}
 
-      <p className="rounded-md border bg-muted/40 p-3 text-xs text-muted-foreground">
-        <AlertTriangle className="mr-2 inline-block h-3.5 w-3.5" aria-hidden="true" />
+      <p className="mt-6 flex gap-3 rounded-2xl border border-border bg-muted/50 p-4 text-xs text-muted-foreground">
+        <Info className="h-4 w-4 shrink-0 translate-y-0.5" aria-hidden="true" />
         {t(lang, "results.disclaimer")}
       </p>
 
-      <div className="flex justify-center gap-2 pt-2">
-        <Button variant="outline" onClick={scanAnother}>
-          <RotateCcw className="h-4 w-4" aria-hidden="true" />
-          {t(lang, "results.scanAnother")}
-        </Button>
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/90 backdrop-blur-md">
+        <div className="shell flex flex-col gap-3 py-3 sm:flex-row sm:justify-end">
+          <Button
+            size="lg"
+            variant="outline"
+            onClick={() => router.push(`/review${query}`)}
+          >
+            <PencilLine className="h-5 w-5" aria-hidden="true" />
+            {t(lang, "results.editDetails")}
+          </Button>
+          <Button
+            size="lg"
+            onClick={() => {
+              reset();
+              router.push(`/${query}`);
+            }}
+          >
+            <RotateCcw className="h-5 w-5" aria-hidden="true" />
+            {t(lang, "results.scanAnother")}
+          </Button>
+        </div>
       </div>
-    </div>
+    </>
   );
 }
 
+/**
+ * Copy the number, then open the portal.
+ *
+ * The clipboard write is attempted first but never blocks the navigation: a
+ * browser that denies clipboard access should still get the user to the portal,
+ * where they can type the number by hand.
+ */
+async function copyAndOpen(url: string, text: string, lang: Lang) {
+  let copied = false;
+  try {
+    await navigator.clipboard?.writeText(text);
+    copied = true;
+  } catch {
+    /* clipboard denied - the portal still opens */
+  }
+  window.open(url, "_blank", "noopener,noreferrer");
+  if (copied) toast.success(t(lang, "results.numberCopied"));
+}
+
 function CheckCard({ check, lang }: { check: Check; lang: Lang }) {
-  const title =
-    check.id === "company"
-      ? t(lang, "results.company")
-      : check.id === "licence"
-        ? t(lang, "results.licence")
-        : t(lang, "results.labelRules");
+  const meta = CHECK_META[check.id as CheckId];
+  const Icon = meta?.icon ?? ScrollText;
+
   return (
-    <Card>
-      <CardHeader className="flex flex-row items-center justify-between space-y-0 pb-2">
-        <CardTitle className="text-sm">{title}</CardTitle>
-        <StatusBadge status={check.status} lang={lang} />
-      </CardHeader>
-      <CardContent>
-        <p className="text-xs text-muted-foreground">
-          {check.flags.length === 0
-            ? "No flags."
-            : `${check.flags.length} flag${check.flags.length === 1 ? "" : "s"}`}
-        </p>
+    <Card interactive className="h-full">
+      <CardContent className="flex h-full flex-col gap-3 p-5">
+        <div className="flex items-start justify-between gap-3">
+          <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-primary-soft text-primary">
+            <Icon className="h-5 w-5" aria-hidden="true" />
+          </span>
+        </div>
+        <h2 className="text-lg font-bold tracking-tight">
+          {meta ? t(lang, meta.title) : check.id}
+        </h2>
+        <StatusBadge status={check.status} lang={lang} className="self-start" />
       </CardContent>
     </Card>
   );
 }
 
-interface PartyLite {
-  role: PartyRole;
-  name: { value: string | null } | null;
-}
-
-interface FlagsProps {
+/**
+ * Flags, grouped by the party they concern.
+ *
+ * The backend tags a flag with `evidence.party` (an index into the parties the
+ * client sent) when it can attribute it. Anything unattributed goes to a
+ * "General" group rather than being pinned on the first company on the pack.
+ */
+function FlagGroups({
+  results,
+  parties,
+  lang,
+}: {
   results: VerifyResponse;
+  parties: Party[];
   lang: Lang;
-  parties: PartyLite[];
-}
+}) {
+  const groups = new Map<number | "general", Flag[]>();
 
-function FlagsByParty({ results, lang, parties }: FlagsProps) {
-  // Bucket flags by `evidence.party` (the index into the parties array we sent).
-  // Anything without a party index falls into the "General" bucket.
-  const buckets = new Map<number | "general", Flag[]>();
-  results.checks.forEach((c) =>
-    c.flags.forEach((f) => {
-      const idx =
-        f.evidence && typeof f.evidence === "object"
-          ? (f.evidence as Record<string, unknown>).party
-          : undefined;
+  for (const check of results.checks) {
+    for (const flag of check.flags) {
+      const raw = flag.evidence?.party;
       const key =
-        typeof idx === "number" && Number.isInteger(idx) && idx >= 0
-          ? idx
-          : "general";
-      const arr = buckets.get(key) ?? [];
-      arr.push(f);
-      buckets.set(key, arr);
-    }),
-  );
-
-  if (buckets.size === 0) return null;
-
-  const entries: Array<{
-    key: number | "general";
-    title: string;
-    flags: Flag[];
-  }> = [];
-  for (const [key, flags] of buckets.entries()) {
-    if (key === "general") {
-      entries.push({ key, title: "General", flags });
-    } else {
-      const party = parties[key];
-      const title = party
-        ? `${tRole(lang, party.role)}${
-            party.name?.value ? ` - ${party.name.value}` : ""
-          }`
-        : `Party ${key + 1}`;
-      entries.push({ key, title, flags });
+        typeof raw === "number" && Number.isInteger(raw) && raw >= 0 ? raw : "general";
+      groups.set(key, [...(groups.get(key) ?? []), flag]);
     }
   }
 
+  if (groups.size === 0) return null;
+
+  const title = (key: number | "general") => {
+    if (key === "general") return t(lang, "results.general");
+    const party = parties[key];
+    if (!party) return `${t(lang, "results.general")} ${key + 1}`;
+    return `${tRole(lang, party.role)}${party.name.value ? ` — ${party.name.value}` : ""}`;
+  };
+
   return (
-    <section aria-label="Flags" className="space-y-3">
-      {entries.map((entry) => (
-        <Card key={String(entry.key)}>
-          <CardHeader className="pb-2">
-            <CardTitle className="text-sm">
-              {t(lang, "results.flagsFor")} {entry.title}
+    <section aria-label={t(lang, "results.flagsFor")} className="mt-6 space-y-4">
+      {[...groups.entries()].map(([key, flags]) => (
+        <Card key={String(key)}>
+          <CardHeader>
+            <CardTitle className="text-base">
+              {t(lang, "results.flagsFor")} {title(key)}
             </CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2">
-            {entry.flags.map((flag) => (
+          <CardContent className="space-y-3">
+            {flags.map((flag) => (
               <div
                 key={flag.code}
-                className={`rounded-md border p-3 text-sm ${SEVERITY_CLASS[flag.severity]}`}
+                className="flex gap-3 rounded-xl border border-border p-4"
               >
-                <p className="font-medium">
-                  {flag.code} ({flag.severity})
-                </p>
-                <p className="mt-1">{lang === "hi" ? flag.hi : flag.en}</p>
+                <SeverityDot severity={flag.severity} />
+                <div className="min-w-0 space-y-2">
+                  <p className="text-base leading-relaxed">
+                    {lang === "hi" ? flag.hi : flag.en}
+                  </p>
+                  <EvidenceChips evidence={flag.evidence} />
+                </div>
               </div>
             ))}
           </CardContent>
@@ -252,12 +262,28 @@ function FlagsByParty({ results, lang, parties }: FlagsProps) {
   );
 }
 
-function ResultsSkeleton() {
+/** `party` is a routing hint for this screen, not a finding - so it is not shown. */
+const HIDDEN_EVIDENCE = new Set(["party"]);
+
+function EvidenceChips({ evidence }: { evidence: Record<string, unknown> | null }) {
+  if (!evidence) return null;
+  const entries = Object.entries(evidence).filter(
+    ([key, value]) =>
+      !HIDDEN_EVIDENCE.has(key) && value !== null && value !== undefined && value !== "",
+  );
+  if (entries.length === 0) return null;
+
   return (
-    <div className="mx-auto max-w-3xl space-y-4">
-      <Skeleton className="mx-auto h-44 w-44 rounded-full" />
-      <Skeleton className="h-20 w-full" />
-      <Skeleton className="h-20 w-full" />
-    </div>
+    <ul className="flex flex-wrap gap-1.5">
+      {entries.map(([key, value]) => (
+        <li
+          key={key}
+          className="rounded-lg bg-muted px-2 py-1 text-xs text-muted-foreground"
+        >
+          <span className="font-semibold">{key.replace(/_/g, " ")}:</span>{" "}
+          <span className="font-mono">{String(value)}</span>
+        </li>
+      ))}
+    </ul>
   );
 }

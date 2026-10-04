@@ -1,252 +1,236 @@
 /**
- * Review page. Lets the user confirm/edit what we read, then POSTs to
- * `/api/verify` (mock-aware) when they press Verify.
+ * Review: confirm what we read, then verify.
+ *
+ * The screen exists because the backend checks *confirmed* values, not guesses.
+ * Anything the reader was unsure about is marked rather than quietly accepted,
+ * and a field the pack genuinely does not print is left blank on purpose - the
+ * label-law checker needs to tell "not printed" apart from "not filled in".
  */
 "use client";
 
 import * as React from "react";
 import { useRouter, useSearchParams } from "next/navigation";
-import Link from "next/link";
-import { Plus } from "lucide-react";
+import Image from "next/image";
+import { Plus, ShieldCheck, ChevronDown, Ticket } from "lucide-react";
 import { toast } from "sonner";
+import { PageShell } from "@/components/page-shell";
 import { Button } from "@/components/ui/button";
-import { Card, CardContent } from "@/components/ui/card";
-import { Header } from "@/components/header";
-import { ErrorBoundary } from "@/components/error-boundary";
+import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Select } from "@/components/ui/select";
-import { useScan, makeBlankParty } from "@/lib/scan-store";
 import { ProductDetailsCard } from "@/components/product-details-card";
 import { PartyCard } from "@/components/party-card";
+import { useScan } from "@/lib/scan-store";
 import { toVerifyBody, verifyItem } from "@/lib/api";
 import { t, tRole } from "@/lib/i18n";
-import type { Party, ProductFieldKey } from "@/lib/types";
-
-const ROLE_ORDER: Party["role"][] = [
-  "marketer",
-  "manufacturer",
-  "packer",
-  "importer",
-];
+import { cn } from "@/lib/utils";
+import type { Lang } from "@/lib/types";
 
 export default function ReviewPage() {
   return (
-    <ErrorBoundary>
-      <Header />
-      <main className="container py-6 sm:py-10">
-        <React.Suspense fallback={null}>
-          <ReviewContent />
-        </React.Suspense>
-      </main>
-    </ErrorBoundary>
+    <PageShell className="shell py-8 pb-32 sm:py-12">
+      <React.Suspense fallback={null}>
+        <ReviewContent />
+      </React.Suspense>
+    </PageShell>
   );
 }
 
 function ReviewContent() {
   const router = useRouter();
   const params = useSearchParams();
-  const mockParam = params.get("mock");
   const {
     lang,
-    scan,
-    parties,
-    setScan,
+    draft,
+    photoUrl,
+    setProductField,
+    setPartyField,
     setPartyRole,
-    setFieldOnParty,
-    removeParty,
     addParty,
+    removeParty,
     attachLicence,
     setResults,
+    startEmptyDraft,
   } = useScan();
+
+  const mock = params.get("mock");
+  const query = mock ? `?mock=${mock}` : "";
   const [submitting, setSubmitting] = React.useState(false);
-  void setResults;
 
-  if (!scan) {
-    return (
-      <div className="mx-auto max-w-md text-center">
-        <h1 className="text-xl font-semibold">{t(lang, "review.title")}</h1>
-        <p className="mt-2 text-sm text-muted-foreground">
-          {t(lang, "review.noFields")}
-        </p>
-        <Button asChild className="mt-4">
-          <Link href="/">
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            {t(lang, "review.manualEntry")}
-          </Link>
-        </Button>
-      </div>
-    );
-  }
+  // Landing here directly (a refresh, a shared link) leaves nothing to review.
+  // Give them an empty form rather than an error - the form is useful on its own.
+  React.useEffect(() => {
+    if (!draft) startEmptyDraft();
+  }, [draft, startEmptyDraft]);
 
-  const sortedParties = [...parties].sort(
-    (a, b) => ROLE_ORDER.indexOf(a.role) - ROLE_ORDER.indexOf(b.role),
-  );
-
-  // Reuses `setScan` so the in-memory scan object stays in sync with edits.
-  const updateProductField = (key: ProductFieldKey, value: string | null) => {
-    const next = {
-      ...scan,
-      fields: {
-        ...scan.fields,
-        product: {
-          ...scan.fields.product,
-          [key]: {
-            value,
-            confidence: 1,
-            uncertain: false,
-            source: "user" as const,
-          },
-        },
-      },
-    };
-    setScan(next, parties);
-  };
+  if (!draft) return null;
 
   const onVerify = async () => {
     setSubmitting(true);
     try {
-      const body = toVerifyBody(scan, parties);
-      const result = await verifyItem(body, mockParam);
+      const result = await verifyItem(toVerifyBody(draft), mock);
       setResults(result);
-      router.push(`/results${mockParam ? `?mock=${mockParam}` : ""}`);
+      router.push(`/results${query}`);
     } catch (err) {
-      const message =
-        err && typeof err === "object" && "message" in err
-          ? String((err as { message: unknown }).message)
-          : t(lang, "scanning.networkError");
-      toast.error(message);
+      toast.error(
+        err instanceof DOMException && err.name === "AbortError"
+          ? t(lang, "scanning.timeout")
+          : t(lang, "scanning.networkError"),
+      );
     } finally {
       setSubmitting(false);
     }
   };
 
-  const noContent =
-    parties.length === 0 &&
-    scan.fields.unassigned_licences.length === 0 &&
-    Object.values(scan.fields.product).every((v) => !v?.value);
-
-  if (noContent) {
-    return (
-      <div className="mx-auto max-w-md space-y-4 text-center">
-        <h1 className="text-xl font-semibold">{t(lang, "review.title")}</h1>
-        <p className="text-sm text-muted-foreground">
-          {t(lang, "review.noFields")}
-        </p>
-        <div className="flex justify-center gap-2">
-          <Button
-            onClick={() => addParty(makeBlankParty("manufacturer"))}
-          >
-            <Plus className="h-4 w-4" aria-hidden="true" />
-            {t(lang, "review.manualEntry")}
-          </Button>
-          <Button asChild variant="outline">
-            <Link href="/">{t(lang, "app.retake")}</Link>
-          </Button>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className="mx-auto max-w-3xl space-y-6">
-      <header className="flex flex-col gap-2">
-        <h1 className="text-2xl font-bold tracking-tight sm:text-3xl">
+    <>
+      <header className="max-w-2xl">
+        <h1 className="text-h1 font-extrabold tracking-tight">
           {t(lang, "review.title")}
         </h1>
+        <p className="mt-3 text-base text-muted-foreground">
+          {t(lang, "review.subtitle")}
+        </p>
       </header>
 
-      <ProductDetailsCard
-        fields={scan.fields.product}
-        lang={lang}
-        onChange={(key, value) => updateProductField(key, value)}
-      />
+      <div className="mt-8 grid gap-6 lg:grid-cols-[0.8fr_1.2fr] lg:gap-8">
+        <PhotoPanel url={photoUrl} lang={lang} />
 
-      {sortedParties.length > 0 ? (
-        <section
-          aria-label={t(lang, "review.partiesTitle")}
-          className="space-y-3"
-        >
-          {sortedParties.map((party, idx) => (
-            <PartyCard
-              key={party.id}
-              index={idx}
-              party={party}
-              lang={lang}
-              onRoleChange={(role) => setPartyRole(party.id, role)}
-              onFieldChange={(field, value) =>
-                setFieldOnParty(party.id, field, value)
-              }
-              onRemove={() => removeParty(party.id)}
-            />
-          ))}
-        </section>
-      ) : null}
+        <div className="space-y-5">
+          <ProductDetailsCard
+            product={draft.product}
+            lang={lang}
+            onChange={setProductField}
+          />
 
-      <div className="flex flex-wrap gap-2">
-        <Button
-          variant="outline"
-          onClick={() => addParty(makeBlankParty("manufacturer"))}
-        >
-          <Plus className="h-4 w-4" aria-hidden="true" />
-          {t(lang, "review.addParty")}
-        </Button>
+          <section aria-label={t(lang, "review.partiesTitle")} className="space-y-5">
+            <h2 className="text-xl font-extrabold tracking-tight">
+              {t(lang, "review.partiesTitle")}
+            </h2>
+            {draft.parties.map((party) => (
+              <PartyCard
+                key={party.id}
+                party={party}
+                lang={lang}
+                canRemove={draft.parties.length > 1}
+                onRoleChange={(role) => setPartyRole(party.id, role)}
+                onFieldChange={(key, value) => setPartyField(party.id, key, value)}
+                onRemove={() => removeParty(party.id)}
+              />
+            ))}
+
+            <Button variant="outline" size="lg" onClick={() => addParty()}>
+              <Plus className="h-5 w-5" aria-hidden="true" />
+              {t(lang, "review.addParty")}
+            </Button>
+          </section>
+
+          {draft.unassigned_licences.length > 0 ? (
+            <Card>
+              <CardHeader className="flex-row items-center gap-3 space-y-0">
+                <span className="grid h-10 w-10 shrink-0 place-items-center rounded-xl bg-warning-soft text-warning">
+                  <Ticket className="h-5 w-5" aria-hidden="true" />
+                </span>
+                <CardTitle>{t(lang, "review.unassignedLicences")}</CardTitle>
+              </CardHeader>
+              <CardContent className="space-y-3">
+                {draft.unassigned_licences.map((licence, index) => (
+                  <div
+                    key={`${licence.field.value ?? "null"}-${index}`}
+                    className="flex flex-wrap items-center gap-3 rounded-xl border border-border p-3.5"
+                  >
+                    <code className="rounded-lg bg-muted px-2.5 py-1 font-mono text-sm">
+                      {licence.field.value ?? "—"}
+                    </code>
+                    <Select
+                      className="h-11 max-w-[16rem] flex-1 text-sm"
+                      defaultValue=""
+                      aria-label={t(lang, "review.attachToParty")}
+                      onChange={(e) => {
+                        if (e.target.value) attachLicence(index, e.target.value);
+                      }}
+                    >
+                      <option value="">{t(lang, "review.attachToParty")}…</option>
+                      {draft.parties.map((party) => (
+                        <option key={party.id} value={party.id}>
+                          {tRole(lang, party.role)}
+                          {party.unit_code.value ? ` · ${party.unit_code.value}` : ""}
+                          {party.name.value ? ` — ${party.name.value}` : ""}
+                        </option>
+                      ))}
+                    </Select>
+                  </div>
+                ))}
+              </CardContent>
+            </Card>
+          ) : null}
+        </div>
       </div>
 
-      {scan.fields.unassigned_licences.length > 0 ? (
-        <Card>
-          <CardContent className="space-y-3 p-4">
-            <h2 className="text-sm font-semibold">
-              {t(lang, "review.unassignedLicences")}
-            </h2>
-            <ul className="space-y-2">
-              {scan.fields.unassigned_licences.map((licence, i) => (
-                <li
-                  key={`${licence.value ?? "null"}-${i}`}
-                  className="flex flex-wrap items-center gap-2 rounded-md border bg-background p-3"
-                >
-                  <code className="rounded bg-muted px-2 py-0.5 text-xs">
-                    {licence.value ?? "—"}
-                  </code>
-                  <span className="text-sm text-muted-foreground">
-                    {t(lang, "review.attachToParty")}
-                  </span>
-                  <Select
-                    aria-label={t(lang, "review.attachToParty")}
-                    className="h-9 max-w-xs"
-                    onChange={(e) => {
-                      const partyId = e.target.value;
-                      if (partyId) attachLicence(i, partyId);
-                    }}
-                    defaultValue=""
-                  >
-                    <option value="">—</option>
-                    {sortedParties.map((p) => (
-                      <option key={p.id} value={p.id}>
-                        {tRole(lang, p.role)}
-                        {p.unit_code.value ? ` - ${p.unit_code.value}` : ""}
-                      </option>
-                    ))}
-                  </Select>
-                </li>
-              ))}
-            </ul>
-          </CardContent>
-        </Card>
-      ) : null}
-
-      <div className="sticky bottom-0 -mx-4 mt-6 border-t bg-background/95 px-4 py-3 backdrop-blur sm:mx-0 sm:rounded-lg sm:border sm:px-5">
-        <div className="flex flex-col gap-2 sm:flex-row sm:justify-end">
-          <Button asChild variant="outline" className="sm:w-auto">
-            <Link href="/">{t(lang, "app.retake")}</Link>
-          </Button>
+      {/* Always reachable without scrolling back up, on every breakpoint. */}
+      <div className="fixed inset-x-0 bottom-0 z-30 border-t border-border bg-card/90 backdrop-blur-md">
+        <div className="shell flex items-center justify-end gap-3 py-3">
           <Button
-            size="lg"
+            size="xl"
+            className="w-full sm:w-auto"
             onClick={onVerify}
             disabled={submitting}
-            className="sm:w-auto"
           >
+            <ShieldCheck className="h-5 w-5" aria-hidden="true" />
             {submitting ? t(lang, "common.loading") : t(lang, "review.verify")}
           </Button>
         </div>
+      </div>
+    </>
+  );
+}
+
+/**
+ * The photo, kept beside the fields.
+ *
+ * On desktop it sticks, so the user can read a blurred number off the picture
+ * while typing it. On mobile there is no room for both, so it collapses - shut
+ * by default, because the keyboard matters more than the picture on a phone.
+ */
+function PhotoPanel({ url, lang }: { url: string | null; lang: Lang }) {
+  const [open, setOpen] = React.useState(false);
+  const [zoomed, setZoomed] = React.useState(false);
+
+  if (!url) return <div className="hidden lg:block" />;
+
+  return (
+    <div className="lg:sticky lg:top-24 lg:self-start">
+      <button
+        type="button"
+        onClick={() => setOpen((v) => !v)}
+        aria-expanded={open}
+        className="flex h-12 w-full items-center justify-between rounded-xl border border-border bg-card px-4 text-base font-semibold lg:hidden"
+      >
+        {open ? t(lang, "review.hidePhoto") : t(lang, "review.showPhoto")}
+        <ChevronDown
+          className={cn("h-5 w-5 transition-transform", open && "rotate-180")}
+          aria-hidden="true"
+        />
+      </button>
+
+      <div className={cn("mt-3 lg:mt-0", open ? "block" : "hidden lg:block")}>
+        <button
+          type="button"
+          onClick={() => setZoomed((v) => !v)}
+          aria-label={zoomed ? "Zoom out" : "Zoom in"}
+          className="block w-full overflow-hidden rounded-2xl border border-border bg-card shadow-card"
+        >
+          <Image
+            src={url}
+            alt=""
+            width={900}
+            height={1200}
+            unoptimized
+            className={cn(
+              "h-auto w-full origin-center object-contain transition-transform duration-300",
+              zoomed && "scale-150",
+            )}
+          />
+        </button>
       </div>
     </div>
   );

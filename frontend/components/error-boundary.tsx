@@ -33,7 +33,7 @@ export class ErrorBoundary extends React.Component<Props, State> {
   render() {
     if (!this.state.error) return this.props.children;
     return (
-      <main className="container py-12">
+      <main className="shell py-12">
         <Card>
           <CardHeader>
             <CardTitle>Something went wrong</CardTitle>

@@ -2,30 +2,56 @@
 @tailwind components;
 @tailwind utilities;
 
+/**
+ * Design tokens.
+ *
+ * Stored as HSL channel triplets rather than hex so Tailwind's slash-opacity
+ * syntax works on every one of them (`bg-primary/10`, `border-warning/40`).
+ * Each is annotated with the hex it came from, because the hex is what gets
+ * discussed in design review.
+ */
 @layer base {
   :root {
-    --background: 0 0% 100%;
-    --foreground: 222 47% 11%;
-    --muted: 210 40% 96%;
-    --muted-foreground: 215 16% 47%;
+    --background: 160 23% 97%;        /* #F7FAF9 */
+    --foreground: 222 47% 11%;        /* #0F172A ink */
+
     --card: 0 0% 100%;
     --card-foreground: 222 47% 11%;
-    --primary: 222 47% 11%;
-    --primary-foreground: 210 40% 98%;
+
+    --muted: 210 40% 96%;             /* #F1F5F9 */
+    --muted-foreground: 215 19% 35%;  /* #475569 */
+
+    --primary: 175 77% 26%;           /* #0F766E */
+    --primary-hover: 176 69% 22%;     /* #115E59 */
+    --primary-soft: 167 85% 89%;      /* #CCFBF1 */
+    --primary-foreground: 0 0% 100%;
+
     --secondary: 210 40% 96%;
     --secondary-foreground: 222 47% 11%;
-    --accent: 210 40% 96%;
-    --accent-foreground: 222 47% 11%;
-    --destructive: 0 72% 51%;
-    --destructive-foreground: 0 0% 100%;
-    --success: 142 71% 38%;
+
+    --accent: 167 85% 89%;
+    --accent-foreground: 176 69% 22%;
+
+    --success: 142 76% 36%;           /* #16A34A */
+    --success-soft: 141 84% 93%;      /* #DCFCE7 */
     --success-foreground: 0 0% 100%;
-    --warning: 32 95% 44%;
+
+    --warning: 32 95% 44%;            /* #D97706 */
+    --warning-soft: 48 96% 89%;       /* #FEF3C7 */
     --warning-foreground: 0 0% 100%;
-    --border: 214 32% 91%;
+
+    --destructive: 0 72% 51%;         /* #DC2626 */
+    --destructive-soft: 0 93% 94%;    /* #FEE2E2 */
+    --destructive-foreground: 0 0% 100%;
+
+    --neutral: 215 16% 47%;           /* #64748B */
+    --neutral-soft: 210 40% 96%;      /* #F1F5F9 */
+
+    --border: 214 32% 91%;            /* #E2E8F0 */
     --input: 214 32% 91%;
-    --ring: 222 47% 11%;
-    --radius: 0.625rem;
+    --ring: 175 77% 26%;
+
+    --radius: 1rem;                   /* rounded-2xl on cards */
   }
 }
 
@@ -33,38 +59,102 @@
   * {
     border-color: hsl(var(--border));
   }
+
   html {
     -webkit-tap-highlight-color: transparent;
     -webkit-text-size-adjust: 100%;
   }
+
   body {
     background-color: hsl(var(--background));
     color: hsl(var(--foreground));
     font-feature-settings: "rlig" 1, "calt" 1;
-    font-family: ui-sans-serif, system-ui, -apple-system, "Segoe UI", Roboto,
-      "Noto Sans", "Noto Sans Devanagari", "Helvetica Neue", Arial, sans-serif;
+    /* 17px on mobile, 18px from `sm` up. Nothing in the UI goes below 14px. */
+    font-size: 17px;
+    line-height: 1.6;
   }
-  /* Improve accessibility - focus rings only when tabbing. */
+
+  @media (min-width: 640px) {
+    body {
+      font-size: 18px;
+    }
+  }
+
+  /**
+   * Devanagari needs more vertical room than Latin at the same point size;
+   * without this, Hindi headlines clip their matras against tight line-heights.
+   */
+  :lang(hi) {
+    line-height: 1.75;
+  }
+
   :focus-visible {
     outline: 2px solid hsl(var(--ring));
     outline-offset: 2px;
-    border-radius: 4px;
+    border-radius: 6px;
   }
 }
 
-@media (prefers-reduced-motion: reduce) {
-  *, *::before, *::after {
-    animation-duration: 0.001ms !important;
-    animation-iteration-count: 1 !important;
-    transition-duration: 0.001ms !important;
+@layer components {
+  /** The page gutter: 24px on mobile, 32px from `sm` up, capped at 1152px. */
+  .shell {
+    width: 100%;
+    max-width: 72rem;
+    margin-inline: auto;
+    padding-inline: 1.5rem;
+  }
+
+  @media (min-width: 640px) {
+    .shell {
+      padding-inline: 2rem;
+    }
+  }
+
+  /**
+   * The soft teal glow behind the hero. Painted as a background layer on the
+   * section itself rather than as a positioned child, so it can never
+   * intercept a click or add a scrollbar at narrow widths.
+   */
+  .hero-glow {
+    background-image: radial-gradient(
+      60rem 28rem at 50% -8rem,
+      hsl(var(--primary) / 0.1),
+      transparent 70%
+    );
   }
 }
 
-/* Pulse animation used by skeletons. */
+/* The sweep that travels down the photo while the label is being read. */
+@keyframes scan-sweep {
+  0% {
+    transform: translateY(-10%);
+    opacity: 0;
+  }
+  15% {
+    opacity: 1;
+  }
+  85% {
+    opacity: 1;
+  }
+  100% {
+    transform: translateY(1000%);
+    opacity: 0;
+  }
+}
+
+.scan-sweep {
+  animation: scan-sweep 2.1s cubic-bezier(0.4, 0, 0.2, 1) infinite;
+}
+
 @keyframes shimmer {
-  0% { background-position: -200px 0; }
-  100% { background-position: calc(200px + 100%) 0; }
+  0% {
+    background-position: -200px 0;
+  }
+  100% {
+    background-position: calc(200px + 100%) 0;
+  }
 }
+
 .shimmer {
   background: linear-gradient(
     90deg,
@@ -74,4 +164,20 @@
   );
   background-size: 200px 100%;
   animation: shimmer 1.4s infinite linear;
+}
+
+/**
+ * One global opt-out, honoured by the CSS animations above. Framer Motion is
+ * told separately via `useReducedMotion`, because it animates inline styles
+ * that a media query cannot reach.
+ */
+@media (prefers-reduced-motion: reduce) {
+  *,
+  *::before,
+  *::after {
+    animation-duration: 0.001ms !important;
+    animation-iteration-count: 1 !important;
+    transition-duration: 0.001ms !important;
+    scroll-behavior: auto !important;
+  }
 }

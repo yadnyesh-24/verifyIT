@@ -1,0 +1,19 @@
+{
+  "name": "verifyit",
+  "version": "0.1.0",
+  "private": true,
+  "description": "Run the VerifyIT backend and frontend together from the repo root.",
+  "scripts": {
+    "dev:all": "concurrently -n api,web -c cyan,magenta -k \"npm:dev:api\" \"npm:dev:web\"",
+    "dev:api": "node scripts/dev-api.mjs",
+    "dev:web": "npm --prefix frontend run dev:lan",
+    "start:all": "concurrently -n api,web -c cyan,magenta -k \"npm:dev:api\" \"npm --prefix frontend run start:lan\"",
+    "smoke": "node --disable-warning=MODULE_TYPELESS_PACKAGE_JSON scripts/smoke.mjs",
+    "lint": "npm --prefix frontend run lint",
+    "build": "npm --prefix frontend run build",
+    "typecheck": "npm --prefix frontend run typecheck"
+  },
+  "devDependencies": {
+    "concurrently": "^9.1.2"
+  }
+}

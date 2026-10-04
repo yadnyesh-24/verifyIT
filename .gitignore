@@ -91,6 +91,10 @@ data/test_labels/real/*
 data/test_labels/fake/*
 !data/test_labels/real/.gitkeep
 !data/test_labels/fake/.gitkeep
+# ...except the synthetic one. It is generated, carries no real product and no
+# personal data, and `scripts/smoke.mjs` needs *an* image to exercise
+# `POST /api/scan` from a fresh clone.
+!data/test_labels/real/sample_label.jpg
 
 # Frontend (Yadnyesh's track)
 frontend/node_modules/
