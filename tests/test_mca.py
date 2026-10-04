@@ -473,7 +473,8 @@ def test_verify_company_pass_flows_through_the_api(
     data = TestClient(app).post("/api/verify", json={"cin": "TESTFIXTURE-CIN-0001"}).json()
     company = next(c for c in data["checks"] if c["id"] == "company")
     assert company == {"id": "company", "status": "pass", "flags": []}
-    # The other two checks are untouched and the score is still withheld.
+    # The other two checks are untouched, and the one check that ran is scored.
     assert [c["id"] for c in data["checks"]] == ["company", "licence", "label_law"]
-    assert data["score"] is None
-    assert data["verdict"] == "not_checked"
+    assert data["checks_ran"] == 1
+    assert data["score"] == 100
+    assert data["verdict"] == "low_risk"

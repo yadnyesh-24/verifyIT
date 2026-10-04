@@ -15,6 +15,11 @@ The only other signals reported today are *deterministic, registry-independent*
 ones, such as the FSSAI number format, which can be checked without contacting
 any registry. No company, licence or verdict is ever invented.
 
+The trust score is **derived, never invented**: it is computed from the checks
+that actually ran (and is ``null`` when none did), normalised by their weights,
+and it always travels with ``checks_ran`` so that a partial score is visible as
+partial rather than read as a whole-label verdict.
+
 Replace the individual ``check_*`` functions with real integrations when
 credentials and endpoints become available.
 """
@@ -22,7 +27,7 @@ credentials and endpoints become available.
 from __future__ import annotations
 
 import re
-from typing import Any
+from typing import Any, Sequence
 
 from backend import mca
 
@@ -30,6 +35,17 @@ from backend import mca
 
 #: Status of a check whose registry is not connected.
 STATUS_NOT_CHECKED = "not_checked"
+
+#: Status of a check that ran and found nothing to report.
+STATUS_PASS = "pass"
+
+#: Status of a check that ran and found something the user must look at.
+STATUS_WARN = "warn"
+
+#: Status of a check that ran and disproved the claim. Reserved: no check emits
+#: it today, because absent evidence (a lagging snapshot, a misread label) never
+#: proves that a label is wrong.
+STATUS_FAIL = "fail"
 
 #: Reason surfaced when a registry check has not been performed.
 REGISTRY_PENDING_REASON = "Registry connection pending"
@@ -39,6 +55,11 @@ OCR_PENDING_REASON = "OCR pipeline not connected"
 
 #: Verdict used while no check can be completed.
 VERDICT_NOT_CHECKED = "not_checked"
+
+#: Verdicts for a scored result, from calm to serious.
+VERDICT_LOW_RISK = "low_risk"
+VERDICT_MEDIUM_RISK = "medium_risk"
+VERDICT_HIGH_RISK = "high_risk"
 
 #: Check identifiers - these must match the agreed JSON contract exactly.
 CHECK_COMPANY = "company"
@@ -92,6 +113,119 @@ def _fssai_format_flag(fssai_number: str | None) -> dict[str, Any] | None:
         "hi": "FSSAI नंबर 14 अंकों का नहीं है - यह गलत पढ़ा या गलत छपा हो सकता है।",
         "evidence": {"fssai": fssai_number},
     }
+
+
+# --- Trust score -------------------------------------------------------------
+
+#: Weight each check carries in the trust score. The three weights add up to 100,
+#: so a label that passes every check it was possible to run scores 100.
+CHECK_WEIGHTS: dict[str, int] = {
+    CHECK_COMPANY: 40,
+    CHECK_LICENCE: 35,
+    CHECK_LABEL_LAW: 25,
+}
+
+#: Fraction of its weight a ``warn`` check keeps, decided by its *worst* flag.
+WARN_CREDIT: dict[str, float] = {"high": 0.0, "medium": 0.5, "low": 0.8}
+
+#: Lowest score that still counts as ``low_risk`` / ``medium_risk``.
+LOW_RISK_MIN_SCORE = 75
+MEDIUM_RISK_MIN_SCORE = 40
+
+#: The verdict floor a flag of each severity contributes.
+SEVERITY_VERDICTS: dict[str, str] = {
+    "high": VERDICT_HIGH_RISK,
+    "medium": VERDICT_MEDIUM_RISK,
+    "low": VERDICT_LOW_RISK,
+}
+
+_VERDICT_RANK: dict[str, int] = {
+    VERDICT_NOT_CHECKED: 0,
+    VERDICT_LOW_RISK: 1,
+    VERDICT_MEDIUM_RISK: 2,
+    VERDICT_HIGH_RISK: 3,
+}
+
+
+def check_credit(check: dict[str, Any]) -> float | None:
+    """Return the fraction of its weight that a single check earned.
+
+    ``None`` means the check never ran (``not_checked``). Such a check is left
+    out of the score entirely instead of being counted as a zero, because "we
+    could not check this" is not the same statement as "this failed".
+
+    ``pass`` earns the whole weight, ``fail`` earns none, and a ``warn`` earns
+    the credit of its *worst* flag - so a single high-severity finding takes that
+    check's entire weight away.
+    """
+    status = check["status"]
+    if status == STATUS_NOT_CHECKED:
+        return None
+    if status == STATUS_PASS:
+        return 1.0
+    if status == STATUS_FAIL:
+        return 0.0
+    credits = [
+        WARN_CREDIT.get(flag.get("severity"), WARN_CREDIT["medium"])
+        for flag in check.get("flags") or []
+    ]
+    return min(credits) if credits else WARN_CREDIT["medium"]
+
+
+def count_checks_ran(checks: Sequence[dict[str, Any]]) -> int:
+    """Return how many checks produced a result (``not_checked`` excluded)."""
+    return sum(1 for check in checks if check["status"] != STATUS_NOT_CHECKED)
+
+
+def score_checks(checks: Sequence[dict[str, Any]]) -> int | None:
+    """Return the trust score 0-100, or ``None`` when no check could run.
+
+    Only the checks that actually ran are counted, and the result is normalised
+    by *their* combined weight. The score therefore always means "of what we were
+    able to check": a registry we have not connected never silently drags the
+    number down. It must always travel with ``count_checks_ran``, so that a
+    partial score is visible as partial rather than read as a whole-label verdict.
+    """
+    earned = 0.0
+    ran_weight = 0
+    for check in checks:
+        credit = check_credit(check)
+        if credit is None:
+            continue
+        weight = CHECK_WEIGHTS.get(check["id"], 0)
+        ran_weight += weight
+        earned += weight * credit
+    if ran_weight == 0:
+        return None
+    return round(earned / ran_weight * 100)
+
+
+def verdict_for_checks(checks: Sequence[dict[str, Any]], score: int | None) -> str:
+    """Return the verdict for a scored set of checks.
+
+    The verdict is the *more serious* of the score's band and the worst flag
+    severity found, so a high-severity finding is never played down by an
+    otherwise clean score. With no score there is no verdict to give: the result
+    stays ``not_checked``, which is a pending state and never a failure.
+    """
+    if score is None:
+        return VERDICT_NOT_CHECKED
+    verdict = _verdict_for_score(score)
+    for check in checks:
+        for flag in check.get("flags") or []:
+            from_flag = SEVERITY_VERDICTS.get(flag.get("severity"))
+            if from_flag and _VERDICT_RANK[from_flag] > _VERDICT_RANK[verdict]:
+                verdict = from_flag
+    return verdict
+
+
+def _verdict_for_score(score: int) -> str:
+    """Band a numeric score into a verdict."""
+    if score >= LOW_RISK_MIN_SCORE:
+        return VERDICT_LOW_RISK
+    if score >= MEDIUM_RISK_MIN_SCORE:
+        return VERDICT_MEDIUM_RISK
+    return VERDICT_HIGH_RISK
 
 
 # --- Company / CIN (local MCA Company Master Data snapshot) -------------------
@@ -194,13 +328,13 @@ def check_company(
     if match["matched_on"] == "cin":
         status = match.get("status")
         if status and not _is_active_status(status):
-            check["status"] = "warn"
+            check["status"] = STATUS_WARN
             check["flags"].append(_mca_not_active_flag(match))
         else:
-            check["status"] = "pass"
+            check["status"] = STATUS_PASS
         return check
 
-    check["status"] = "warn"
+    check["status"] = STATUS_WARN
     check["flags"].append(_mca_name_only_flag(match))
     return check
 
@@ -221,7 +355,7 @@ def check_licence(
     flag = _fssai_format_flag(fssai_number)
     if flag is not None:
         check["flags"].append(flag)
-        check["status"] = "warn"
+        check["status"] = STATUS_WARN
     return check
 
 
@@ -270,22 +404,29 @@ def build_verification(
 ) -> dict[str, Any]:
     """Assemble the verify response: three checks plus score, verdict and links.
 
-    ``scan_id``/``score``/``verdict`` stay empty/``not_checked`` until the checks
-    can actually run; nothing is guessed.
+    The score is derived from the checks that actually ran (see
+    ``score_checks``), and it is ``null`` - with a ``not_checked`` verdict - when
+    none of them could run, which is the situation with no registry and no
+    readable label. ``checks_ran`` reports how many checks fed the number, so a
+    partial score is never mistaken for a whole-label verdict. Nothing is
+    guessed: ``scan_id`` stays ``null`` until the OCR pipeline supplies one.
     """
+    checks = [
+        check_company(
+            manufacturer_name=manufacturer_name,
+            manufacturer_address=manufacturer_address,
+            cin=cin,
+        ),
+        check_licence(fssai_number=fssai_number, bis_number=bis_number),
+        check_label_law(fields=fields),
+    ]
+    score = score_checks(checks)
     return {
         "scan_id": None,
-        "checks": [
-            check_company(
-                manufacturer_name=manufacturer_name,
-                manufacturer_address=manufacturer_address,
-                cin=cin,
-            ),
-            check_licence(fssai_number=fssai_number, bis_number=bis_number),
-            check_label_law(fields=fields),
-        ],
-        "score": None,
-        "verdict": VERDICT_NOT_CHECKED,
+        "checks": checks,
+        "score": score,
+        "checks_ran": count_checks_ran(checks),
+        "verdict": verdict_for_checks(checks, score),
         "official_links": build_official_links(
             fssai_number=fssai_number, bis_number=bis_number, cin=cin
         ),

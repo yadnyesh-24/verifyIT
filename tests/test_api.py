@@ -12,7 +12,7 @@ from backend.main import app
 client = TestClient(app)
 
 #: The agreed response contract keys.
-VERIFY_KEYS = {"scan_id", "checks", "score", "verdict", "official_links"}
+VERIFY_KEYS = {"scan_id", "checks", "score", "checks_ran", "verdict", "official_links"}
 CHECK_IDS = ["company", "licence", "label_law"]
 
 
@@ -58,6 +58,7 @@ def test_verify_empty_body_contract() -> None:
     assert all(c["flags"] == [] for c in data["checks"])
     assert data["scan_id"] is None
     assert data["score"] is None
+    assert data["checks_ran"] == 0
     assert data["verdict"] == "not_checked"
     assert data["official_links"] == []
 

@@ -74,6 +74,7 @@ Per field (once OCR is wired): `{ "value": "…", "confidence": 0.0-1.0,
     { "id": "label_law", "status": "not_checked", "flags": [] }
   ],
   "score": null,
+  "checks_ran": 0,
   "verdict": "not_checked",
   "official_links": []
 }
@@ -81,7 +82,8 @@ Per field (once OCR is wired): `{ "value": "…", "confidence": 0.0-1.0,
 
 - `checks[].status` ∈ `"pass" | "warn" | "fail" | "not_checked"`
 - `checks[].flags[]` = `{ code, severity: "high" | "medium" | "low", en, hi, evidence }`
-- `score` = `0..100` **or `null`** while unresolved
+- `score` = `0..100` **or `null`** when no check could run
+- `checks_ran` = `0..3`, how many checks fed `score`
 - `verdict` ∈ `"low_risk" | "medium_risk" | "high_risk" | "not_checked"`
 - `official_links[]` = `{ label, url, copy }`
 
@@ -90,6 +92,21 @@ Per field (once OCR is wired): `{ "value": "…", "confidence": 0.0-1.0,
 `not_checked` is **not** a failure and **not** a pass. Render it as
 **"Verification pending"**, not a red/green badge. `score: null` /
 `verdict: "not_checked"` → the gauge shows a pending/— state, **not 0**.
+
+### Showing the score (important)
+
+`score` is computed from the checks that **ran**, so never render it on its own —
+always pair it with `checks_ran`:
+
+```jsx
+{score === null
+  ? "—"                                              // nothing ran: pending, not 0
+  : `Trust score ${score} — based on ${checks_ran} of 3 checks`}
+```
+
+`"Trust score 100 — based on 1 of 3 checks"` is honest. A bare `100` is not. The
+full formula is in
+[`API_CONTRACT.md`](API_CONTRACT.md#the-trust-score).
 
 ### What you can already demo
 
@@ -100,10 +117,12 @@ curl -X POST http://127.0.0.1:8001/api/verify \
   -H 'Content-Type: application/json' -d '{"fssai":"123"}'
 ```
 
-→ `licence.status: "warn"` with `code: "FSSAI_FORMAT_INVALID"` (English + Hindi).
+→ `licence.status: "warn"` with `code: "FSSAI_FORMAT_INVALID"` (English + Hindi),
+and `score: 50` / `checks_ran: 1` / `verdict: "medium_risk"` — the first response
+that carries a real trust score.
 Use [`samples/verify_response_fssai_invalid.json`](samples/verify_response_fssai_invalid.json)
-to build and demo the flag UI. **A valid format is not a verified licence** —
-never show "Verified" for it.
+to build and demo both the flag UI and the gauge. **A valid format is not a
+verified licence** — never show "Verified" for it.
 
 ### The `company` check can now answer (two new flag codes)
 

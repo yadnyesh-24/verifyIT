@@ -27,8 +27,9 @@
       "flags": []
     }
   ],
-  "score": null,
-  "verdict": "not_checked",
+  "score": 50,
+  "checks_ran": 1,
+  "verdict": "medium_risk",
   "official_links": [
     {
       "label": "Verify FSSAI licence",

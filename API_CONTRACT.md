@@ -15,9 +15,11 @@ in `backend/main.py` and `backend/providers.py`. Written for frontend consumers.
 > Data* register when the team has imported one (see
 > **[`MCA_SETUP.md`](MCA_SETUP.md)**); with no snapshot - or with no confident
 > match - it returns `status: "not_checked"`. FSSAI/BIS, Surepass and the OCR
-> pipeline are not connected. `score` stays `null` and `verdict` stays
-> `"not_checked"`: one resolvable check is not a whole-label verdict. No real or
-> fake registry data is ever invented.
+> pipeline are not connected. `score` is **computed from the checks that actually
+> ran** (see **[The trust score](#the-trust-score)**) and is `null` - with
+> `verdict: "not_checked"` - only when none of them could run. `checks_ran`
+> reports how many checks fed the number, so a partial score can never be read as
+> a whole-label verdict. No real or fake registry data is ever invented.
 
 ## Endpoints
 
@@ -82,18 +84,20 @@ strings). `{}` or no body is valid and returns `200 OK`.
     { "id": "label_law", "status": "not_checked", "flags": [] }
   ],
   "score": null,
+  "checks_ran": 0,
   "verdict": "not_checked",
   "official_links": []
 }
 ```
 
-| Field            | Type              | Notes                                                        |
-| ---------------- | ----------------- | ------------------------------------------------------------ |
-| `scan_id`        | `string \| null`  | Echo of the scan id, or `null`.                              |
-| `checks`         | `Check[]`         | Always three, in order `company`, `licence`, `label_law`.    |
-| `score`          | `integer \| null` | Trust score 0-100, or `null` while unresolved.               |
-| `verdict`        | `string`          | `low_risk` / `medium_risk` / `high_risk` / `not_checked`.    |
-| `official_links` | `OfficialLink[]`  | One-tap official verification links.                         |
+| Field            | Type              | Notes                                                                |
+| ---------------- | ----------------- | -------------------------------------------------------------------- |
+| `scan_id`        | `string \| null`  | Echo of the scan id, or `null`.                                      |
+| `checks`         | `Check[]`         | Always three, in order `company`, `licence`, `label_law`.            |
+| `score`          | `integer \| null` | Trust score 0-100 **of the checks that ran**, or `null` if none ran.  |
+| `checks_ran`     | `integer`         | `0..3` - how many checks fed `score`.                                |
+| `verdict`        | `string`          | `low_risk` / `medium_risk` / `high_risk` / `not_checked`.             |
+| `official_links` | `OfficialLink[]`  | One-tap official verification links.                                 |
 
 `Check`: `{ id: string, status: "pass"|"warn"|"fail"|"not_checked", flags: Flag[] }`
 
@@ -196,12 +200,58 @@ Values below are illustrative - build the UI from the shapes, not the numbers.
 > statement that the label itself is genuine. `"not_checked"` is never a failure,
 > and `"fail"` is deliberately not produced by this check at all.
 
+## The trust score
+
+`score` and `verdict` are **derived from the checks that ran** - never invented,
+and never a silent zero for a registry the backend has not connected.
+
+1. Each check carries a weight: `company` 40, `licence` 35, `label_law` 25. The
+   three add up to 100, so a label that passes every check it was possible to run
+   scores `100`.
+2. A check earns a fraction of its weight:
+   - `pass` -> the whole weight
+   - `warn` -> the credit of its **worst** flag: `low` 0.8, `medium` 0.5, `high` 0.0
+   - `fail` -> nothing (no check emits `fail` today)
+   - `not_checked` -> **excluded from the calculation entirely**
+3. `score = round(100 * earned / weight of the checks that ran)`.
+
+`verdict` is the **more serious** of the score's band and the worst flag severity
+found, so a high-severity finding is never played down by an otherwise clean score:
+
+| Score    | Band          |
+| -------- | ------------- |
+| `>= 75`  | `low_risk`    |
+| `>= 40`  | `medium_risk` |
+| `< 40`   | `high_risk`   |
+
+| Worst flag severity | Verdict floor |
+| ------------------- | ------------- |
+| `high`              | `high_risk`   |
+| `medium`            | `medium_risk` |
+| `low`               | `low_risk`    |
+
+With no score at all - no check ran - there is nothing to band: `score` is `null`
+and `verdict` stays `not_checked` (a pending state, not a failure).
+
+**Worked examples.** Only the checks that ran are counted, so the same number can
+mean different things; `checks_ran` is what disambiguates it:
+
+| Checks that ran | Arithmetic | `score` | `checks_ran` | `verdict` |
+| --------------- | ---------- | ------- | ------------ | --------- |
+| none (`{}`) | - | `null` | `0` | `not_checked` |
+| `licence` = `warn` (`medium`) | `35 * 0.5 / 35` | `50` | `1` | `medium_risk` |
+| `company` = `pass` | `40 * 1.0 / 40` | `100` | `1` | `low_risk` |
+| `company` = `warn` (`high`), `licence` = `pass`, `label_law` = `pass` | `(0 + 35 + 25) / 100` | `60` | `3` | `high_risk` |
+
 ## Displaying statuses
 
 - `not_checked` -> render **"Verification pending"**, not a pass/fail badge.
   It means the check has not run yet. Never infer a failure from it.
 - `score: null` / `verdict: "not_checked"` -> the gauge shows a pending state,
   **not 0**.
+- `score: 0..100` -> show the number **together with `checks_ran`**, e.g.
+  `"Trust score 50 - based on 1 of 3 checks"`. A bare number reads as a
+  whole-label verdict, which it is not unless `checks_ran == 3`.
 
 ## Examples
 
@@ -251,7 +301,7 @@ async function verifyItem(fields = {}) {
     body: JSON.stringify(fields),
   });
   if (!res.ok) throw new Error(`verify failed: ${res.status}`);
-  return res.json(); // { scan_id, checks, score, verdict, official_links }
+  return res.json(); // { scan_id, checks, score, checks_ran, verdict, official_links }
 }
 
 // not_checked is NOT a failure - it means the check has not run yet.

@@ -91,7 +91,14 @@ def test_build_official_links_for_present_numbers() -> None:
 
 def test_build_verification_contract() -> None:
     result = providers.build_verification()
-    assert set(result) == {"scan_id", "checks", "score", "verdict", "official_links"}
+    assert set(result) == {
+        "scan_id",
+        "checks",
+        "score",
+        "checks_ran",
+        "verdict",
+        "official_links",
+    }
     assert [c["id"] for c in result["checks"]] == [
         providers.CHECK_COMPANY,
         providers.CHECK_LICENCE,
@@ -100,8 +107,116 @@ def test_build_verification_contract() -> None:
     assert all(c["status"] == providers.STATUS_NOT_CHECKED for c in result["checks"])
     assert result["scan_id"] is None
     assert result["score"] is None
+    assert result["checks_ran"] == 0
     assert result["verdict"] == providers.VERDICT_NOT_CHECKED
     assert result["official_links"] == []
+
+
+# --- Trust score -------------------------------------------------------------
+
+
+def _check(check_id: str, status: str, *severities: str) -> dict:
+    """Build a bare check dict for the scoring tests (no registry involved)."""
+    return {
+        "id": check_id,
+        "status": status,
+        "flags": [{"severity": s} for s in severities],
+    }
+
+
+def test_credit_of_an_unchecked_check_is_none() -> None:
+    assert providers.check_credit(providers.pending_check(providers.CHECK_COMPANY)) is None
+
+
+def test_no_score_without_a_single_ran_check() -> None:
+    """Unchecked checks must not be scored at all - and never as a zero."""
+    checks = [providers.pending_check(cid) for cid in providers.CHECK_WEIGHTS]
+    assert providers.score_checks(checks) is None
+    assert providers.score_checks([]) is None
+    assert providers.count_checks_ran(checks) == 0
+
+
+def test_a_passing_check_scores_full_marks() -> None:
+    checks = [_check(providers.CHECK_COMPANY, providers.STATUS_PASS)]
+    assert providers.score_checks(checks) == 100
+    assert providers.verdict_for_checks(checks, 100) == providers.VERDICT_LOW_RISK
+
+
+def test_unchecked_checks_do_not_drag_the_score_down() -> None:
+    """A registry we have not connected is not evidence against the label."""
+    ran = [_check(providers.CHECK_COMPANY, providers.STATUS_PASS)]
+    mixed = ran + [providers.pending_check(providers.CHECK_LICENCE)]
+    assert providers.score_checks(mixed) == providers.score_checks(ran) == 100
+    assert providers.count_checks_ran(mixed) == 1
+
+
+def test_warn_credit_uses_the_worst_flag() -> None:
+    check = _check(providers.CHECK_LICENCE, providers.STATUS_WARN, "low", "high")
+    assert providers.check_credit(check) == providers.WARN_CREDIT["high"]
+
+
+def test_warn_without_flags_is_credited_as_medium() -> None:
+    assert (
+        providers.check_credit(_check(providers.CHECK_LICENCE, providers.STATUS_WARN))
+        == providers.WARN_CREDIT["medium"]
+    )
+
+
+def test_unknown_severity_falls_back_to_medium_credit() -> None:
+    check = _check(providers.CHECK_LICENCE, providers.STATUS_WARN, "catastrophic")
+    assert providers.check_credit(check) == providers.WARN_CREDIT["medium"]
+
+
+def test_fail_earns_nothing() -> None:
+    checks = [_check(providers.CHECK_COMPANY, providers.STATUS_FAIL)]
+    assert providers.score_checks(checks) == 0
+
+
+@pytest.mark.parametrize(
+    ("score", "verdict"),
+    [
+        (100, "low_risk"),
+        (75, "low_risk"),
+        (74, "medium_risk"),
+        (40, "medium_risk"),
+        (39, "high_risk"),
+        (0, "high_risk"),
+    ],
+)
+def test_verdict_bands(score: int, verdict: str) -> None:
+    assert providers.verdict_for_checks([], score) == verdict
+
+
+def test_verdict_without_a_score_stays_not_checked() -> None:
+    assert providers.verdict_for_checks([], None) == providers.VERDICT_NOT_CHECKED
+
+
+def test_verdict_is_never_softer_than_the_worst_flag() -> None:
+    """A high-severity finding must not be played down by a healthy score."""
+    checks = [
+        _check(providers.CHECK_COMPANY, providers.STATUS_WARN, "high"),
+        _check(providers.CHECK_LICENCE, providers.STATUS_PASS),
+        _check(providers.CHECK_LABEL_LAW, providers.STATUS_PASS),
+    ]
+    score = providers.score_checks(checks)
+    assert score == 60  # the company check's 40 points are lost entirely
+    assert providers.verdict_for_checks(checks, score) == providers.VERDICT_HIGH_RISK
+
+
+def test_build_verification_scores_the_fssai_format_check() -> None:
+    """The one signal that exists today also moves the score."""
+    result = providers.build_verification(fssai_number="123")
+    assert result["checks_ran"] == 1
+    assert result["score"] == 50  # the 35-point licence check keeps half of it
+    assert result["verdict"] == providers.VERDICT_MEDIUM_RISK
+
+
+def test_build_verification_keeps_a_valid_fssai_format_unscored() -> None:
+    """A valid format is not a validity result: nothing ran, so nothing is scored."""
+    result = providers.build_verification(fssai_number="10012022000123")
+    assert result["checks_ran"] == 0
+    assert result["score"] is None
+    assert result["verdict"] == providers.VERDICT_NOT_CHECKED
 
 
 def test_build_scan_placeholder() -> None:

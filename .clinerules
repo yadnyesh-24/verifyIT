@@ -37,7 +37,7 @@ These rules apply to every Cline task in this repository. Keep them in sync with
 - `GET /api/health` -> `{"status":"ok","app":"Verify It"}`.
 - `POST /api/scan` (multipart `file`) -> `{scan_id, status, reason, fields}`.
 - `POST /api/verify` (optional JSON body) ->
-  `{scan_id, checks, score, verdict, official_links}`.
+  `{scan_id, checks, score, checks_ran, verdict, official_links}`.
 - `checks` is always exactly three, in order: `company`, `licence`, `label_law`.
 - A check status is one of `pass`, `warn`, `fail`, `not_checked`.
 - A flag is `{code, severity, en, hi, evidence}`; `severity` is `high|medium|low`.
@@ -52,9 +52,15 @@ These rules apply to every Cline task in this repository. Keep them in sync with
 - **Never invent registry data.** Anything the API reports must come from a real
   government export (today: the MCA *Company Master Data* snapshot) or from a
   deterministic check on the label itself. A check whose registry is not connected
-  is `status: "not_checked"`, and `score`/`verdict` stay `null`/`"not_checked"`
-  until every check can run. No fake companies, licences, CINs, trust scores or
+  is `status: "not_checked"`. No fake companies, licences, CINs, trust scores or
   verdicts. Ever.
+- **The score is derived, never invented.** `score`/`verdict` come from
+  `providers.score_checks()` / `providers.verdict_for_checks()` over the checks
+  that actually ran: a `not_checked` check is *excluded*, never counted as a zero,
+  and the result is `null`/`"not_checked"` when no check ran at all. `checks_ran`
+  must always be sent with `score`, and the UI must never show the number without
+  it. Changing the weights (40/35/25), the warn credits (0.8/0.5/0.0) or the bands
+  (75/40) means updating `API_CONTRACT.md`, `samples/` and the tests together.
 - **A miss is not a failure.** A company absent from the MCA snapshot stays
   `not_checked` - the snapshot is a dated export and can lag. The `company` check
   never emits `fail`; `pass` requires an exact CIN whose recorded status is Active.

@@ -131,13 +131,17 @@ class OfficialLink(BaseModel):
 class VerifyResponse(BaseModel):
     """Result of POST /api/verify.
 
-    ``score`` is null and ``verdict`` is ``not_checked`` until the registry
-    providers are connected and the checks can actually run.
+    ``score`` is computed from the checks that actually ran, and is ``null`` when
+    none of them could run. ``checks_ran`` says how many checks fed that number,
+    so a partial score is never mistaken for a whole-label verdict.
     """
 
     scan_id: str | None = None
     checks: list[Check]
     score: int | None = Field(default=None, description="Trust score 0-100, or null.")
+    checks_ran: int = Field(
+        default=0, description="How many of the three checks produced a result."
+    )
     verdict: str = Field(description="'low_risk', 'medium_risk', 'high_risk' or 'not_checked'.")
     official_links: list[OfficialLink] = Field(default_factory=list)
 

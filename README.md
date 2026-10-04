@@ -138,6 +138,13 @@ it stays `not_checked`, and a company that is missing from the snapshot is
 only other real signal is the deterministic FSSAI **format** check. No real or
 fake registry data is ever invented.
 
+The **Trust Score** obeys the same rule: it is computed only from the checks that
+actually ran — a check that did not run is excluded, never counted as a zero — and
+it is `null` (with `verdict: "not_checked"`) when nothing could run at all.
+`checks_ran` travels with it so a partial score is never read as a whole-label
+verdict. The formula is in
+[`API_CONTRACT.md`](API_CONTRACT.md#the-trust-score).
+
 Check the snapshot the check reads, in one command:
 
 ```bash
@@ -195,6 +202,9 @@ What it covers:
   dry run that never opens the database.
 - Company-check policy: `pass` / `warn` / `not_checked` mapping, both MCA flag
   codes, and the invariant that the check is **never** `fail`.
+- The trust score: derived from the checks that ran, `null` when none ran, the
+  worst-flag credit, the verdict bands, and the rule that a high-severity flag is
+  never played down by a healthy score.
 - Official links and the "no invented fields" invariant.
 - CORS: the dev origin is allowed, an unknown origin is not echoed.
 - `samples/` fixtures match the live API exactly.
