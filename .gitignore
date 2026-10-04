@@ -84,3 +84,12 @@ data/test_labels/real/*
 data/test_labels/fake/*
 !data/test_labels/real/.gitkeep
 !data/test_labels/fake/.gitkeep
+
+# Frontend (Yadnyesh's track)
+frontend/node_modules/
+frontend/.next/
+frontend/out/
+frontend/.env*.local
+frontend/.turbo/
+frontend/tsconfig.tsbuildinfo
+frontend/*.tsbuildinfo
