@@ -17,6 +17,25 @@ Score** in seconds.
 The frontend-facing contract is **frozen** in [`API_CONTRACT.md`](API_CONTRACT.md),
 with mock responses in [`samples/`](samples/). Start there.
 
+## Getting the repo
+
+```bash
+git clone https://github.com/yadnyesh-24/verifyIT.git
+cd verifyIT
+git checkout <your-branch>     # frontend/yadnyesh | ocr/sunil | main
+```
+
+| Branch | Owner | Use it for |
+| ------ | ----- | ---------- |
+| `main` | Aditya | integration trunk; everything merges here |
+| `frontend/yadnyesh` | Yadnyesh | the PWA |
+| `ocr/sunil` | Sunil | `src/` — the Read + Label-law track |
+
+Work on your own branch (`git pull --rebase origin <branch>` → commit →
+`git push origin <branch>`) and open a PR into `main` when a chunk is demo-ready.
+Only `backend/providers.py` is shared on purpose — it is the single integration
+seam. Do not edit `backend/main.py` (routes and schemas): the contract is frozen.
+
 ## Layout
 
 ```text

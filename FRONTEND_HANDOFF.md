@@ -11,6 +11,21 @@ snapshot (see [`MCA_SETUP.md`](MCA_SETUP.md)), so build it for every status.
 - **Frozen mock data:** [`samples/`](samples/) — use these as fixtures and build
   the whole interface against them until the API is wired.
 
+## Getting the code
+
+```bash
+git clone https://github.com/yadnyesh-24/verifyIT.git
+cd verifyIT
+git checkout frontend/yadnyesh
+```
+
+The team repo is <https://github.com/yadnyesh-24/verifyIT>. `frontend/yadnyesh`
+is your branch — keep the Next.js app in its own folder (e.g. `web/`) and push to
+that branch (`git pull --rebase origin frontend/yadnyesh` → commit →
+`git push origin frontend/yadnyesh`). `main` is the integration trunk; open a PR
+into it when a chunk is demo-ready. **The backend in this repo and
+`API_CONTRACT.md` are frozen** — read them, don't change them.
+
 ## User journey (how the calls fit)
 
 1. **Upload / camera** → `POST /api/scan` with the image.

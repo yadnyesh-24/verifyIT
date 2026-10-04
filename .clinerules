@@ -19,6 +19,19 @@ These rules apply to every Cline task in this repository. Keep them in sync with
   - `scripts/import_mca.py` - importer for the local registry snapshot.
   - `tests/` - pytest tests; `samples/` - frozen frontend mock responses.
   - `data/` - local registry exports (git-ignored, never committed).
+  - `src/` - Sunil's *Read* (OCR) + *Label-law* track; `docs/label_rules.md`
+    holds the Legal Metrology rules it implements.
+
+## Repository & branches
+- Team GitHub repo (this is `origin`): <https://github.com/yadnyesh-24/verifyIT>.
+- Branches: `main` (integration trunk, Aditya), `frontend/yadnyesh` (Yadnyesh),
+  `ocr/sunil` (Sunil). Teammates work on their own branch and PR into `main`.
+- Start: `git clone https://github.com/yadnyesh-24/verifyIT.git && cd verifyIT`
+  then `git checkout <your-branch>`.
+- Sync before you commit: `git pull --rebase origin <your-branch>`, then
+  `git push origin <your-branch>`.
+- Sunil edits only `build_scan()` + `check_label_law()` in `backend/providers.py`.
+  Yadnyesh does not edit this repo's backend at all - the contract is frozen.
 
 ## API contract (frozen - change only with docs + tests + samples)
 - `GET /api/health` -> `{"status":"ok","app":"Verify It"}`.
