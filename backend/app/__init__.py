@@ -1,0 +1,1 @@
+"""VerifyIT backend application package."""
