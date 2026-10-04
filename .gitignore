@@ -52,11 +52,13 @@ coverage.xml
 Thumbs.db
 desktop.ini
 
-# Project: raw data, models, large artifacts
+# Project: raw data and large artifacts (folder structure stays, contents are ignored)
 data/raw/
 data/processed/
-data/test_labels/real/
-data/test_labels/fake/
+data/test_labels/real/*
+!data/test_labels/real/.gitkeep
+data/test_labels/fake/*
+!data/test_labels/fake/.gitkeep
 *.pt
 *.h5
 *.pkl
@@ -71,4 +73,3 @@ logs/
 *.spec
 *.exe
 *.dll
-*.so
