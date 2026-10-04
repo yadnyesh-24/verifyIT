@@ -43,23 +43,47 @@ in `backend/main.py` and `backend/providers.py`. Written for frontend consumers.
 
 `multipart/form-data` with an optional `file` field (the label photo).
 
-**Response `200 OK`:**
+**Response `200 OK` (no file uploaded — the placeholder):**
 
 ```json
 {
-  "scan_id": null,
+  "scan_id": "scan_<uuid4hex>",
   "status": "not_checked",
   "reason": "OCR pipeline not connected",
   "fields": {}
 }
 ```
 
-`fields` is a map of field name -> `ScanField`. Once the OCR pipeline is
-connected each field looks like:
+**Response `200 OK` (with a real photo — the OCR pipeline is wired):**
 
 ```json
-{ "value": "70 g", "confidence": 0.9, "uncertain": false, "source": "ocr" }
+{
+  "scan_id": "scan_<uuid4hex>",
+  "status": "checked",
+  "reason": null,
+  "fields": {
+    "manufacturer":  {"value": "Acme Foods Pvt Ltd", "confidence": 0.92, "uncertain": false, "source": "ocr"},
+    "address":       {"value": "Plot 21, MIDC, Mumbai", "confidence": 0.88, "uncertain": false, "source": "ocr"},
+    "pincode":       {"value": "400001", "confidence": 0.95, "uncertain": false, "source": "ocr"},
+    "fssai":         {"value": "10012022000123", "confidence": 0.90, "uncertain": false, "source": "ocr"},
+    "bis_licence":   {"value": "1234", "confidence": 0.30, "uncertain": true,  "source": "ocr"},
+    "mrp":           {"value": "99.00", "confidence": 0.85, "uncertain": false, "source": "ocr"},
+    "net_qty":       {"value": "200g", "confidence": 0.85, "uncertain": false, "source": "ocr"},
+    "mfg_date":      {"value": null, "confidence": null, "uncertain": false, "source": null},
+    "expiry":        {"value": null, "confidence": null, "uncertain": false, "source": null},
+    "customer_care": {"value": "1800123456", "confidence": 0.80, "uncertain": false, "source": "ocr"},
+    "cin":           {"value": null, "confidence": null, "uncertain": false, "source": null},
+    "gstin":         {"value": null, "confidence": null, "uncertain": false, "source": null},
+    "product_name":  {"value": "Acme Sauce", "confidence": 0.92, "uncertain": false, "source": "ocr"}
+  }
+}
 ```
+
+`fields` is a map of field name -> `ScanField`. The 13 keys (one per
+required declaration) are always present, even when OCR didn't find
+them — in which case the value is `null` and the field stays
+`source: null`. This lets the review screen render a single shape for
+"found" and "not found" without branching.
 
 | Field        | Type             | Notes                                     |
 | ------------ | ---------------- | ----------------------------------------- |

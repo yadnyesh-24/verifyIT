@@ -593,13 +593,41 @@ def check_licence(
     return check
 
 
-def check_label_law(*, fields: dict[str, Any] | None = None) -> dict[str, Any]:
+def check_label_law(
+    *,
+    fields: dict[str, Any] | None = None,
+) -> dict[str, Any]:
     """Legal Metrology label checks (Packaged Commodities Rules).
 
-    Placeholder: owned by the OCR / label workstream; returns ``not_checked``
-    until the rule engine is wired in.
+    Wires the eight rules in :mod:`backend.ocr.label_law` (R1 maker name,
+    R2 address + pincode, R3 net quantity, R4 MRP, R5 mfg date, R6 customer
+    care, R7 not expired, R8 product name) into the frozen Check contract.
+    See ``docs/label_rules.md`` for the rule text and the Rule 6 references.
+
+    The ``fields`` arg carries the confirmed label fields in the API's
+    *flat* name set (``backend.main.LABEL_FIELD_NAMES``: ``net_qty``,
+    ``expiry``, ``bis_licence``, ...). They are translated to the internal
+    names (``net_quantity``, ``expiry_or_best_before``, ``bis_cml``, ...) so the
+    rule engine can read them, and back out as flags whose ``evidence.field``
+    uses the same names the user typed.
     """
-    return pending_check(CHECK_LABEL_LAW)
+    from backend.ocr.extractor import _to_internal_fields
+    from backend.ocr.label_law import label_law_check
+
+    if not fields:
+        return pending_check(CHECK_LABEL_LAW)
+
+    internal = _to_internal_fields(fields)
+    result = label_law_check(internal)
+    # ``label_law_check`` returns a slightly wider shape than the Check
+    # contract — the rule engine does not need the caller's ``evidence`` keys
+    # in the internal name space, so flatten to the API contract here.
+    out = {
+        "id": result.get("id", CHECK_LABEL_LAW),
+        "status": result.get("status", "not_checked"),
+        "flags": list(result.get("flags", [])),
+    }
+    return out
 
 
 def build_official_links(
@@ -695,17 +723,29 @@ def new_scan_id() -> str:
     return f"{SCAN_ID_PREFIX}{uuid4().hex}"
 
 
-def build_scan(*, scan_id: str | None = None) -> dict[str, Any]:
+def build_scan(
+    *,
+    scan_id: str | None = None,
+    file_bytes: bytes | None = None,
+    image_path: str | None = None,
+) -> dict[str, Any]:
     """Return the OCR result for one scan session.
 
-    The fields are still empty and the status still ``not_checked``, because the
-    OCR pipeline is owned by another workstream and is not connected - no field is
-    guessed or invented. The ``scan_id`` is real: it identifies this upload so the
-    review screen can send it back with the confirmed fields.
+    With ``file_bytes`` or ``image_path``, the real OCR pipeline runs:
+    preprocess → Tesseract (PSM 6 vs 11) → field extraction. Without
+    them, the legacy placeholder is returned so unit tests / callers that
+    don't have a photo (e.g. ``test_scan_without_file_returns_placeholder``)
+    still see the frozen ``not_checked`` + ``fields: {}`` shape.
     """
-    return {
-        "scan_id": scan_id or new_scan_id(),
-        "status": STATUS_NOT_CHECKED,
-        "reason": OCR_PENDING_REASON,
-        "fields": {},
-    }
+    if file_bytes is None and image_path is None:
+        return {
+            "scan_id": scan_id or new_scan_id(),
+            "status": STATUS_NOT_CHECKED,
+            "reason": OCR_PENDING_REASON,
+            "fields": {},
+        }
+    # Lazy import so the test suite can still load providers.py without
+    # pulling in cv2 / pytesseract.
+    from backend.ocr.extractor import extract as ocr_extract
+
+    return ocr_extract(file_bytes if file_bytes is not None else image_path, scan_id=scan_id)

@@ -86,6 +86,16 @@ uploads/
 !data/ground_truth.csv
 !data/mca/company_master_data_TEMPLATE.csv
 
+# VerifyIT test-set CSVs (drafts, parties draft, and the finalized outputs)
+!data/test_labels/ground_truth.csv
+!data/test_labels/ground_truth_parties.csv
+!data/test_labels/ground_truth_draft.csv
+!data/test_labels/ground_truth_parties_draft.csv
+
+# Raw Gemini responses cached by draft_ground_truth.py (gitignored: rebuildable)
+data/test_labels/cache/
+!data/test_labels/cache/.gitkeep
+
 # Captured test-label photos: keep the folders, ignore the photos
 data/test_labels/real/*
 data/test_labels/fake/*

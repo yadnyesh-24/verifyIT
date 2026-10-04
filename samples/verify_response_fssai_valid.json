@@ -13,13 +13,84 @@
     },
     {
       "id": "label_law",
-      "status": "not_checked",
-      "flags": []
+      "status": "fail",
+      "flags": [
+        {
+          "code": "MAKER_NAME_MISSING",
+          "severity": "high",
+          "en": "The package must show the manufacturer's / packer's / importer's name.",
+          "hi": "पैकेज पर निर्माता / पैकर / आयातक का नाम लिखा होना चाहिए।",
+          "evidence": {
+            "field": "manufacturer_name",
+            "value": null
+          }
+        },
+        {
+          "code": "ADDRESS_MISSING",
+          "severity": "medium",
+          "en": "The package must show the manufacturer's / packer's / importer's address with a pincode.",
+          "hi": "पैकेज पर निर्माता / पैकर / आयातक का पूरा पता और पिनकोड लिखा होना चाहिए।",
+          "evidence": {
+            "field": "manufacturer_address",
+            "value": null
+          }
+        },
+        {
+          "code": "NET_QUANTITY_MISSING",
+          "severity": "medium",
+          "en": "The package must clearly show the net quantity (e.g. 100 g, 200 ml).",
+          "hi": "पैकेज पर नेट वज़न (जैसे 100 g / 200 ml) साफ़ तौर पर लिखा होना चाहिए।",
+          "evidence": {
+            "field": "net_quantity",
+            "value": null
+          }
+        },
+        {
+          "code": "MRP_MISSING",
+          "severity": "medium",
+          "en": "The package must show the maximum retail price (MRP).",
+          "hi": "पैकेज पर अधिकतम खुदरा मूल्य (MRP) लिखा होना चाहिए।",
+          "evidence": {
+            "field": "mrp",
+            "value": null
+          }
+        },
+        {
+          "code": "MFG_DATE_MISSING",
+          "severity": "low",
+          "en": "The package must show the month and year of manufacture or packing.",
+          "hi": "पैकेज पर बनाने / पैकिंग की माह और वर्ष लिखा होना चाहिए।",
+          "evidence": {
+            "field": "mfg_date",
+            "value": null
+          }
+        },
+        {
+          "code": "CUSTOMER_CARE_MISSING",
+          "severity": "low",
+          "en": "The package must show a customer-care phone number or address.",
+          "hi": "पैकेज पर ग्राहक सेवा का फ़ोन नंबर या पता लिखा होना चाहिए।",
+          "evidence": {
+            "field": "customer_care",
+            "value": null
+          }
+        },
+        {
+          "code": "PRODUCT_NAME_MISSING",
+          "severity": "high",
+          "en": "The package must clearly show the product name.",
+          "hi": "पैकेज पर उत्पाद का नाम साफ़ तौर पर लिखा होना चाहिए।",
+          "evidence": {
+            "field": "product_name",
+            "value": null
+          }
+        }
+      ]
     }
   ],
-  "score": null,
-  "checks_ran": 0,
-  "verdict": "not_checked",
+  "score": 0,
+  "checks_ran": 1,
+  "verdict": "high_risk",
   "official_links": [
     {
       "label": "Verify FSSAI licence",
@@ -28,3 +99,4 @@
     }
   ]
 }
+

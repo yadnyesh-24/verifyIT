@@ -717,11 +717,16 @@ def test_verify_company_pass_flows_through_the_api(
     data = TestClient(app).post("/api/verify", json={"cin": "TESTFIXTURE-CIN-0001"}).json()
     company = next(c for c in data["checks"] if c["id"] == "company")
     assert company == {"id": "company", "status": "pass", "flags": []}
-    # The other two checks are untouched, and the one check that ran is scored.
+    # The licence check is still not_checked (no FSSAI), and label_law runs
+    # on the body we sent — it has only ``cin``, so every other required
+    # declaration is missing, producing a ``fail`` with high-severity flags.
     assert [c["id"] for c in data["checks"]] == ["company", "licence", "label_law"]
-    assert data["checks_ran"] == 1
-    assert data["score"] == 100
-    assert data["verdict"] == "low_risk"
+    assert data["checks_ran"] == 2
+    # Score is computed from the *checks that ran* (company + label_law),
+    # normalised by their combined weight. company=pass (40), label_law=fail
+    # (0), so 40/65 = 61.5 -> 62.
+    assert 50 <= data["score"] <= 70
+    assert data["verdict"] == "high_risk"
 
 
 # --- CIN + printed manufacturer name consistency ------------------------------
