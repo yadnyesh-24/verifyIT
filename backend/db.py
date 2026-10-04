@@ -6,7 +6,10 @@ single door to it - nothing else in the backend opens a connection.
 
 Design rules:
 
-* **No external network calls.** ``DATABASE_URL`` points at a local database.
+* **No registry API calls.** ``DATABASE_URL`` points at a local database by
+  default, or at the team's shared Postgres; either way the rows are one imported
+  government export, read straight from the table - never fetched from a registry
+  API.
 * **Never break the API.** When the database is missing, empty or unreachable,
   every helper degrades to "no information" (``None`` / ``False``) so the API
   keeps returning honest ``not_checked`` placeholders instead of guessing or

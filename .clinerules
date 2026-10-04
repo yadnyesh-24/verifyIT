@@ -62,9 +62,11 @@ These rules apply to every Cline task in this repository. Keep them in sync with
   `TEMP TABLE companies` with CINs prefixed `TESTFIXTURE`, and the matcher accepts
   an explicit `conn` for that. Never write synthetic rows into the persistent
   `companies` table.
-- **No external network calls** anywhere. The one data source is a *local*
-  PostgreSQL snapshot reached through `backend/db.py`; do not add hidden HTTP calls
-  in routes. `backend/db.py` must degrade to "no information" (`None`) when the
+- **No registry API calls.** The one data source is a PostgreSQL snapshot of a
+  government export, reached *only* through `backend/db.py`. `DATABASE_URL` may
+  point at a local database (the default) or at the team's shared Postgres, but
+  never at a live registry: no HTTP calls in routes, no hidden fetches at request
+  time. `backend/db.py` must degrade to "no information" (`None`) when the
   database is missing or unreachable, so `/api/verify` never 500s because Postgres
   is down.
 - **`not_checked` is not a failure and not a pass.** It means the check has not

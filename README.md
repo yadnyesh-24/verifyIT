@@ -129,13 +129,20 @@ curl -i -X POST http://127.0.0.1:8001/api/scan -F 'file=@label.jpg'
 
 ### Registry status — we are honest, always
 
-The backend makes **no external network calls**. The `company` check reads a
-*local* PostgreSQL snapshot of the MCA *Company Master Data* register that the team
-imports itself (see [`MCA_SETUP.md`](MCA_SETUP.md)). With no snapshot — or no
-confident match — it stays `not_checked`, and a company that is missing from the
-snapshot is **never** reported as `fail`. FSSAI/BIS and Surepass are still
-placeholders; the only other real signal is the deterministic FSSAI **format**
-check. No real or fake registry data is ever invented.
+The backend never calls a registry API. The `company` check reads a PostgreSQL
+snapshot of the MCA *Company Master Data* register that the team imports itself:
+your local database by default, or the team's shared Postgres via `DATABASE_URL`
+(see [`MCA_SETUP.md`](MCA_SETUP.md)). With no snapshot — or no confident match —
+it stays `not_checked`, and a company that is missing from the snapshot is
+**never** reported as `fail`. FSSAI/BIS and Surepass are still placeholders; the
+only other real signal is the deterministic FSSAI **format** check. No real or
+fake registry data is ever invented.
+
+Check the snapshot the check reads, in one command:
+
+```bash
+./.venv/bin/python scripts/check_registry.py
+```
 
 ### Company registry snapshot (optional)
 

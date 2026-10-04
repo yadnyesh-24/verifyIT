@@ -4,7 +4,7 @@ FastAPI application for the "Verify It" hackathon project.
 
 Registry providers (company/CIN, FSSAI, BIS), Surepass and the OCR pipeline are
 not connected yet: real registry data and credentials are unavailable, and no
-external network requests are made. Every check therefore returns a neutral
+external registry API is called. Every check therefore returns a neutral
 ``not_checked`` placeholder (see ``backend.providers``) so the response contract
 stays stable for the frontend while providers are integrated later.
 """
@@ -16,6 +16,17 @@ from fastapi.middleware.cors import CORSMiddleware
 from pydantic import BaseModel, ConfigDict, Field
 
 from backend import providers
+
+# Load `.env` (git-ignored) when it exists so DATABASE_URL, GEMINI_API_KEY, ...
+# can be set once per machine instead of exported by hand. Real environment
+# variables always win - `load_dotenv` does not override them - and the app runs
+# fine with no `.env` at all.
+try:
+    from dotenv import load_dotenv
+
+    load_dotenv()
+except ImportError:  # pragma: no cover - python-dotenv is a declared dependency
+    pass
 
 APP_NAME = "Verify It"
 

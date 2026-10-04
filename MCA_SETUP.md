@@ -1,9 +1,10 @@
 # MCA registry snapshot — setup
 
-The `company` check answers from a **local PostgreSQL snapshot** of the MCA
-*Company Master Data* register. Nothing is fetched at request time and no
-external network call is ever made: you import a government export once and the
-API reads it locally.
+The `company` check answers from a **PostgreSQL snapshot** of the MCA
+*Company Master Data* register — your own local database by default, or one shared
+by the whole team (see [section 1b](#1b-shared-snapshot-supabase---optional)).
+Nothing is fetched at request time and no registry API is ever called: you import
+a government export once and the API reads it from the database.
 
 Without a snapshot the check stays `not_checked` (never a failure), so the
 backend works fine before you import anything.
@@ -23,6 +24,55 @@ psql verifyit -c 'create extension if not exists pg_trgm'   # done by the schema
 ```bash
 export DATABASE_URL="postgresql://user:pass@host:5432/dbname"
 ```
+
+## 1b. Shared snapshot (Supabase) - optional
+
+The whole team can read **one** imported snapshot instead of every person
+downloading and importing a ~1.5M-row export. `backend/db.py` already reads
+`DATABASE_URL`, so this is configuration, not a code change.
+
+Create the project (region **`ap-south-1`** is closest to India), then open the
+**SQL Editor** and run the contents of [`sql/001_companies.sql`](sql/001_companies.sql)
+once. That enables `pg_trgm` and creates `companies` plus its three indexes.
+
+```bash
+# Supabase -> Connect -> "Session pooler". NOT the direct connection.
+export SB='postgresql://postgres.<project-ref>:<password>@aws-0-<region>.pooler.supabase.com:5432/postgres?sslmode=require'
+
+psql "$SB" -c '\dt'                       # sanity: can we reach it?
+
+# import (the schema is already applied above)
+./.venv/bin/python scripts/import_mca.py \
+    --file data/mca/company_master_data.csv \
+    --source-date 2026-03-31 \
+    --database-url "$SB" --no-create-schema
+
+# Confirm the snapshot is usable before blaming the API
+./.venv/bin/python scripts/check_registry.py --database-url "$SB"
+```
+
+Then point the API at it, on **every** machine:
+
+```bash
+export DATABASE_URL="$SB"          # or put it in .env (git-ignored, auto-loaded)
+./.venv/bin/uvicorn backend.main:app --reload --port 8001
+```
+
+### Gotchas that will otherwise cost you an hour
+
+| Symptom | Cause |
+| ------- | ----- |
+| `could not connect` / timeout | `db.<ref>.supabase.co` is **IPv6-only**. Use the pooler host above. |
+| `Tenant or user not found` | The pooler username must be `postgres.<project-ref>`, and the host's region must match the project's region. |
+| `prepared statement ... does not exist`, TEMP tables vanish | You are on the transaction pooler (port **6543**). Use session mode, port **5432**. |
+| Rows are there but the check stays `not_checked` | `name_normalized` is empty - the CSV was uploaded through a dashboard instead of `scripts/import_mca.py`. Re-import. |
+| Everything `not_checked` one morning | A **Free** plan project pauses after 7 days of low activity. Dashboard -> **Resume project**. |
+
+> **Do not upload the CSV through the Supabase table editor.** It infers column
+> types (a pincode of `001100` becomes `1100`) and leaves `name_normalized`
+> blank, so the fuzzy name match silently returns nothing and the trigram index
+> is never created. `scripts/import_mca.py` builds all of that; the dashboard
+> does not.
 
 ## 2. Get the data
 
