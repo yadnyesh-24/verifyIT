@@ -38,6 +38,7 @@ import {
   type DataMode,
   type LabelDraft,
   type Party,
+  type PartyFieldKey,
   type PartyRole,
   type ProductFieldKey,
   type ScanField,
@@ -229,6 +230,25 @@ export function emptyDraft(scanId: string | null = null): LabelDraft {
 const PARTY_KEY = /^party\.(\d+)\.(\w+)$/;
 const UNASSIGNED_KEY = /^unassigned_licence\.(\d+)$/;
 
+/**
+ * Flat company fields, as `POST /api/scan` returns them today, mapped onto the
+ * party they describe.
+ *
+ * The OCR pipeline reads one maker per label and reports it with the same flat
+ * names `/api/verify` accepts (`manufacturer`, `address`, ...). Those belong to
+ * a party in this UI's model, so they are folded into the first one. Without
+ * this the six keys below parsed cleanly and were then dropped on the floor -
+ * the product card filled in and the company card stayed empty.
+ */
+const FLAT_PARTY_FIELDS: Record<string, PartyFieldKey> = {
+  manufacturer: "name",
+  address: "address",
+  pincode: "pincode",
+  fssai: "fssai",
+  cin: "cin",
+  gstin: "gstin",
+};
+
 function asRole(value: string | null): PartyRole {
   return (PARTY_ROLES as readonly string[]).includes(value ?? "")
     ? (value as PartyRole)
@@ -247,10 +267,16 @@ export function draftFromScan(scan: ScanResponse): LabelDraft {
   const draft = emptyDraft(scan.scan_id);
   const byIndex = new Map<number, Partial<Record<string, ScanField>>>();
   const licences: Array<{ index: number; field: ScanField }> = [];
+  const flatParty: Partial<Record<PartyFieldKey, ScanField>> = {};
 
   for (const [key, field] of Object.entries(scan.fields)) {
     if ((PRODUCT_FIELDS as readonly string[]).includes(key)) {
       draft.product[key as ProductFieldKey] = field;
+      continue;
+    }
+    const flat = FLAT_PARTY_FIELDS[key];
+    if (flat) {
+      flatParty[flat] = field;
       continue;
     }
     const party = PARTY_KEY.exec(key);
@@ -274,6 +300,20 @@ export function draftFromScan(scan: ScanResponse): LabelDraft {
       }
       return party;
     });
+
+  // The flat reading describes the manufacturer. It seeds a new party when the
+  // scan listed none, and otherwise fills only the gaps in the first one - an
+  // indexed `party.0.*` key is the more specific statement and must win.
+  const flatEntries = Object.entries(flatParty) as [PartyFieldKey, ScanField][];
+  if (flatEntries.length > 0) {
+    if (draft.parties.length === 0) draft.parties = [makeBlankParty("manufacturer")];
+    const target = primaryParty(draft.parties);
+    if (target) {
+      for (const [key, field] of flatEntries) {
+        if (!target[key].value) target[key] = field;
+      }
+    }
+  }
 
   draft.unassigned_licences = licences
     .sort((a, b) => a.index - b.index)
